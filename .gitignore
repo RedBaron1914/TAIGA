@@ -1,0 +1,12 @@
+/target
+/.taiga_data
+/.idea
+/.vscode
+*.iml
+*.log
+local.properties
+.DS_Store
+/crates/taiga-egui/android/.gradle
+/crates/taiga-egui/android/build
+/crates/taiga-egui/android/app/build
+/crates/taiga-egui/android/app/src/main/jniLibs

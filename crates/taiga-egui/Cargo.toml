@@ -1,0 +1,28 @@
+[package]
+name = "taiga-egui"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+name = "taiga_egui"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+eframe = { version = "0.33.3", default-features = false, features = ["accesskit", "default_fonts", "glow", "wayland", "x11"] }
+env_logger = "0.11.10"
+log = "0.4.29"
+rand = "0.10.1"
+reqwest = "0.13.2"
+serde_json = "1.0.149"
+taiga-mycelium = { version = "0.1.0", path = "../taiga-mycelium" }
+taiga-resin = { version = "0.1.0", path = "../taiga-resin" }
+tokio = { version = "1.52.1", features = ["full"] }
+uuid = { version = "1.23.1", features = ["v4"] }
+x25519-dalek = "2.0.1"
+
+[target.'cfg(target_os = "android")'.dependencies]
+eframe = { version = "0.33.3", default-features = false, features = ["accesskit", "default_fonts", "glow", "android-game-activity"] }
+android_logger = "0.14"
+jni = "0.21.1"
+android-activity = { version = "0.6", features = ["game-activity"] }
+
