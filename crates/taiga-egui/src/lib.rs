@@ -269,40 +269,23 @@ impl TaigaApp {
                     loop {
                         let mut new_freedom = taiga_mycelium::FreedomLevel::None;
                         
-                        #[cfg(target_os = "android")]
-                        let has_real_uplink = true; // We don't need this anymore, ping_bypassing_vpn does the check internally
-                        #[cfg(not(target_os = "android"))]
-                        let has_real_uplink = true;
+                        // 1. Проверяем "Белые списки" (гос. ресурсы, крупные поисковики)
+                        let has_whitelist = _client.get("https://ya.ru").send().await.is_ok();
                         
-                        // Если у нас реально есть физический интернет, начинаем пинги
-                        if has_real_uplink {
-                            // 1. Проверяем "Белые списки" (гос. ресурсы, крупные поисковики)
-                            #[cfg(target_os = "android")]
-                            let has_whitelist = taiga_mycelium::jni_bridge::ping_bypassing_vpn("https://ya.ru");
-                            #[cfg(not(target_os = "android"))]
-                            let has_whitelist = client.get("https://ya.ru").send().await.is_ok();
+                        if has_whitelist {
+                            new_freedom = taiga_mycelium::FreedomLevel::WhitelistOnly;
                             
-                            if has_whitelist {
-                                new_freedom = taiga_mycelium::FreedomLevel::WhitelistOnly;
+                            // 2. Проверяем выход за пределы "белых списков" (обычные сайты)
+                            let has_normal = _client.get("https://coworking.tyuiu.ru").send().await.is_ok();
+                            
+                            if has_normal {
+                                new_freedom = taiga_mycelium::FreedomLevel::Normal;
                                 
-                                // 2. Проверяем выход за пределы "белых списков" (обычные сайты)
-                                #[cfg(target_os = "android")]
-                                let has_normal = taiga_mycelium::jni_bridge::ping_bypassing_vpn("https://coworking.tyuiu.ru");
-                                #[cfg(not(target_os = "android"))]
-                                let has_normal = client.get("https://coworking.tyuiu.ru").send().await.is_ok();
+                                // 3. Проверяем полный доступ (VPN/Антизапрет)
+                                let has_full = _client.get("https://discord.com").send().await.is_ok();
                                 
-                                if has_normal {
-                                    new_freedom = taiga_mycelium::FreedomLevel::Normal;
-                                    
-                                    // 3. Проверяем полный доступ (VPN/Антизапрет)
-                                    #[cfg(target_os = "android")]
-                                    let has_full = taiga_mycelium::jni_bridge::ping_bypassing_vpn("https://discord.com");
-                                    #[cfg(not(target_os = "android"))]
-                                    let has_full = client.get("https://discord.com").send().await.is_ok();
-                                    
-                                    if has_full {
-                                        new_freedom = taiga_mycelium::FreedomLevel::Full;
-                                    }
+                                if has_full {
+                                    new_freedom = taiga_mycelium::FreedomLevel::Full;
                                 }
                             }
                         }
@@ -411,7 +394,7 @@ impl eframe::App for TaigaApp {
             }
         }
 
-        let mut header_frame = egui::Frame::side_top_panel(&ctx.style());
+        let header_frame = egui::Frame::side_top_panel(&ctx.style());
         #[cfg(target_os = "android")]
         {
             // Отступ под "челку" (notch) и статус-бар на Android (около 35 пикселей)
