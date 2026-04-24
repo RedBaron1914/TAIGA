@@ -193,14 +193,10 @@ pub async fn send_mesh_payload(m_ref: &Arc<Mutex<Mycelium>>, target_id: TreeId, 
     let next_hop = path[0];
     let needles = taiga_resin::split_into_needles(&current_data, next_hop, 200);
 
-    if let Some(root) = m.roots.first() {
-        for needle in needles {
-            let _ = root.send_needle(next_hop, needle).await;
-        }
-        Ok(())
-    } else {
-        Err("Нет активных Корней".to_string())
+    for needle in needles {
+        m.broadcast_needle(next_hop, needle).await;
     }
+    Ok(())
 }
 
 /// Выполняется на стороне Экзит-ноды. Отвечает за прием команд из Mesh и пересылку в реальный интернет.

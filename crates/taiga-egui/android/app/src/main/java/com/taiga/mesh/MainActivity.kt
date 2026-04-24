@@ -21,7 +21,28 @@ class MainActivity : GameActivity() {
     private var bleManager: TaigaBleManager? = null
     private var wifiManager: TaigaWifiManager? = null
 
+    private fun getOrCreateNodeId(): ByteArray {
+        val prefs = getSharedPreferences("taiga_prefs", Context.MODE_PRIVATE)
+        var idString = prefs.getString("node_id", null)
+        if (idString == null) {
+            idString = java.util.UUID.randomUUID().toString()
+            prefs.edit().putString("node_id", idString).apply()
+        }
+        val uuid = java.util.UUID.fromString(idString)
+        val bb = java.nio.ByteBuffer.wrap(ByteArray(16))
+        bb.putLong(uuid.mostSignificantBits)
+        bb.putLong(uuid.leastSignificantBits)
+        return bb.array()
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
+        // Регистрируем синглтон для JNI
+        MyceliumCore.activity = this
+        
+        // Генерируем или читаем сохраненный уникальный Node ID и передаем в Rust ДО запуска GameActivity
+        val nodeId = getOrCreateNodeId()
+        MyceliumCore.initNodeId(nodeId)
+
         super.onCreate(savedInstanceState)
         
         Log.i("TAIGA", "Starting GameActivity for egui...")
@@ -76,9 +97,10 @@ class MainActivity : GameActivity() {
     }
 
     private fun startTransports() {
+        val nodeId = getOrCreateNodeId()
+        
         // Запуск BLE-менеджера
-        val dummyNodeId = ByteArray(16) { 0x01 }
-        bleManager = TaigaBleManager(this, dummyNodeId)
+        bleManager = TaigaBleManager(this, nodeId)
         bleManager?.start()
         
         // Запуск Wi-Fi Direct менеджера
@@ -93,6 +115,10 @@ class MainActivity : GameActivity() {
         } else {
             Log.e("TAIGA", "Wi-Fi Direct is not supported on this device.")
         }
+    }
+
+    fun sendBleMessage(macAddress: String, payload: ByteArray) {
+        bleManager?.sendMessage(macAddress, payload)
     }
 
     override fun onResume() {

@@ -135,4 +135,44 @@ class TaigaBleManager(private val context: Context, private val localNodeId: Byt
         
         Log.i(TAG, "BLE Scanner started")
     }
+
+    fun sendMessage(macAddress: String, payload: ByteArray) {
+        val device = bluetoothAdapter?.getRemoteDevice(macAddress) ?: return
+        Log.i(TAG, "Connecting to $macAddress to send ${payload.size} bytes")
+        
+        device.connectGatt(context, false, object : BluetoothGattCallback() {
+            override fun onConnectionStateChange(gatt: BluetoothGatt, status: Int, newState: Int) {
+                if (newState == BluetoothProfile.STATE_CONNECTED) {
+                    Log.i(TAG, "Connected to $macAddress, requesting MTU...")
+                    gatt.requestMtu(256)
+                } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
+                    gatt.close()
+                }
+            }
+
+            override fun onMtuChanged(gatt: BluetoothGatt, mtu: Int, status: Int) {
+                Log.i(TAG, "MTU changed to $mtu, discovering services...")
+                gatt.discoverServices()
+            }
+
+            override fun onServicesDiscovered(gatt: BluetoothGatt, status: Int) {
+                val service = gatt.getService(SERVICE_UUID)
+                val characteristic = service?.getCharacteristic(RX_CHAR_UUID)
+                if (characteristic != null) {
+                    characteristic.value = payload
+                    characteristic.writeType = BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE
+                    val success = gatt.writeCharacteristic(characteristic)
+                    Log.i(TAG, "GATT write started: $success")
+                } else {
+                    Log.e(TAG, "Taiga service or characteristic not found on $macAddress")
+                    gatt.disconnect()
+                }
+            }
+
+            override fun onCharacteristicWrite(gatt: BluetoothGatt, characteristic: BluetoothGattCharacteristic, status: Int) {
+                Log.i(TAG, "GATT write finished with status $status, disconnecting.")
+                gatt.disconnect()
+            }
+        })
+    }
 }

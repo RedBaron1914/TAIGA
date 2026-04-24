@@ -4,9 +4,21 @@ import android.util.Log
 
 object MyceliumCore {
     const val TAG = "TaigaJNI"
+    
+    // Ссылка на активити для обратных вызовов
+    var activity: MainActivity? = null
 
     // Нативные функции, реализованные в Rust (jni_bridge.rs)
     
+    @JvmStatic
+    fun sendBleMessage(macAddress: String, payload: ByteArray) {
+        activity?.sendBleMessage(macAddress, payload)
+    }
+
+    // Передача сохраненного Node ID из Android в Rust при старте
+    @JvmStatic
+    external fun initNodeId(nodeIdBytes: ByteArray)
+
     // Вызывается сканером, когда найдено устройство с сервисом Тайги
     @JvmStatic
     external fun onBleDeviceDiscovered(macAddress: String, nodeIdBytes: ByteArray)
@@ -23,8 +35,6 @@ object MyceliumCore {
 
     init {
         try {
-            // Имя динамической библиотеки, которую скомпилирует cargo-apk / xbuild
-            // Если наш бинарник называется taiga-egui, библиотека будет libtaiga_egui.so
             System.loadLibrary("taiga_egui")
             Log.i(TAG, "Rust JNI library loaded successfully")
         } catch (e: UnsatisfiedLinkError) {

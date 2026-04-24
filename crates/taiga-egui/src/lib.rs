@@ -30,7 +30,11 @@ impl TaigaApp {
         let (tx, rx) = std::sync::mpsc::channel();
         let port: u16 = (rand::random::<u16>() % 21) + 40000; 
 
+        #[cfg(target_os = "android")]
+        let id = taiga_mycelium::jni_bridge::get_android_node_id().unwrap_or_else(Uuid::new_v4);
+        #[cfg(not(target_os = "android"))]
         let id = Uuid::new_v4();
+
         let mut m = Mycelium::new(id, NodeStatus::Tree);
         
         let app_data_dir = std::path::PathBuf::from(".taiga_data");
@@ -62,6 +66,8 @@ impl TaigaApp {
                     m_guard.local_info.clone()
                 };
 
+                let (needle_agg_tx, mut needle_agg_rx) = tokio::sync::mpsc::channel::<(Uuid, taiga_mycelium::Needle)>(1000);
+
                 #[cfg(target_os = "android")]
                 {
                     let (sync_tx, sync_rx) = std::sync::mpsc::channel();
@@ -70,7 +76,23 @@ impl TaigaApp {
                     let m_for_jni = m_for_spawn.clone();
                     let tx_for_jni = tx.clone();
                     let ctx_for_jni = ctx.clone();
+                    let needle_agg_tx_jni = needle_agg_tx.clone();
                     
+                    let local_info_ble = m_for_jni.lock().await.local_info.clone();
+                    let ble_root = taiga_mycelium::ble_root::BleRoot::new(local_info_ble);
+                    
+                    // Добавляем BleRoot в список корней (клонируем)
+                    m_for_jni.lock().await.attach_root(Box::new(ble_root.clone()));
+                    
+                    // Слушатель для BleRoot
+                    let needle_tx_ble = needle_agg_tx.clone();
+                    let ble_root_listener = ble_root.clone();
+                    tokio::spawn(async move {
+                        while let Ok(res) = ble_root_listener.receive_needle().await {
+                            let _ = needle_tx_ble.send(res).await;
+                        }
+                    });
+
                     tokio::spawn(async move {
                         loop {
                             if let Ok(event) = sync_rx.try_recv() {
@@ -84,9 +106,26 @@ impl TaigaApp {
                                         
                                         let local = m_for_jni.lock().await.local_info.clone();
                                         if let Ok(wifi_root) = taiga_mycelium::wifi_root::WifiRoot::new(local, ip, is_group_owner).await {
-                                            m_for_jni.lock().await.attach_root(Box::new(wifi_root));
+                                            let root_box: Box<dyn Root> = Box::new(wifi_root.clone());
+                                            m_for_jni.lock().await.attach_root(root_box);
+                                            
+                                            // Слушатель для нового Wi-Fi корня
+                                            let needle_tx = needle_agg_tx_jni.clone();
+                                            tokio::spawn(async move {
+                                                while let Ok(res) = wifi_root.receive_needle().await {
+                                                    let _ = needle_tx.send(res).await;
+                                                }
+                                            });
                                         }
-                                    }
+                                    },
+                                    taiga_mycelium::jni_bridge::JniEvent::BleDeviceDiscovered(mac, id_bytes) => {
+                                        if let Ok(id) = Uuid::from_slice(&id_bytes) {
+                                            ble_root.add_discovered_neighbor(mac, id).await;
+                                        }
+                                    },
+                                    taiga_mycelium::jni_bridge::JniEvent::BleMessageReceived(mac, payload) => {
+                                        ble_root.inject_needle(mac, payload).await;
+                                    },
                                     _ => {}
                                 }
                             } else {
@@ -110,13 +149,23 @@ impl TaigaApp {
                     };
                     
                     log_rx("NETWORK", &format!("UDP Транспорт запущен на порту {}", port));
+
+                    // Слушатель для UDP корня
+                    let needle_tx_udp = needle_agg_tx.clone();
+                    let udp_root_clone = udp_root.clone();
+                    tokio::spawn(async move {
+                        while let Ok(res) = udp_root_clone.receive_needle().await {
+                            let _ = needle_tx_udp.send(res).await;
+                        }
+                    });
                     
                     let exit_streams = Arc::new(Mutex::new(std::collections::HashMap::new()));
                     
+                    let assembler_for_rx = assembler_clone.clone();
                     tokio::spawn(async move {
                         let mut seen_needles = std::collections::HashSet::new();
                         loop {
-                            if let Ok((sender_id, needle)) = rx_root.receive_needle().await {
+                            if let Some((sender_id, needle)) = needle_agg_rx.recv().await {
                                 let needle_id = (needle.cone_id, needle.sequence_number);
                                 if !seen_needles.insert(needle_id) { continue; }
                                 if seen_needles.len() > 10000 { seen_needles.clear(); }
@@ -125,12 +174,10 @@ impl TaigaApp {
                                 let local_id = m_lock.local_info.id;
                                 
                                 if needle.target_tree == Uuid::nil() {
-                                    if let Some(root) = m_lock.roots.first() {
-                                        let _ = root.send_needle(Uuid::nil(), needle.clone()).await;
-                                    }
+                                    m_lock.broadcast_needle(Uuid::nil(), needle.clone()).await;
                                     drop(m_lock);
                                     
-                                    let mut asm = assembler_clone.lock().await;
+                                    let mut asm = assembler_for_rx.lock().await;
                                     if let Some(full_payload) = asm.receive_needle(needle) {
                                         if let Ok(text) = String::from_utf8(full_payload) {
                                             log_rx("GOSSIP", &format!("Шёпот от {}: {}", sender_id.to_string().chars().take(8).collect::<String>(), text));
@@ -138,7 +185,7 @@ impl TaigaApp {
                                     }
                                 } else if needle.target_tree == local_id {
                                     drop(m_lock);
-                                    let mut asm = assembler_clone.lock().await;
+                                    let mut asm = assembler_for_rx.lock().await;
                                     if let Some(full_encrypted_payload) = asm.receive_needle(needle) {
                                         let decrypted = {
                                             let m = m_for_rx.lock().await;
@@ -167,10 +214,8 @@ impl TaigaApp {
                                                                 let actual_next_hop = path[0];
                                                                 log_rx("ROUTING", &format!("Снят слой луковицы. Пересылка к {}", actual_next_hop));
                                                                 let needles = taiga_resin::split_into_needles(&encrypted_data, actual_next_hop, 200);
-                                                                if let Some(root) = m_guard.roots.first() {
-                                                                    for n in needles {
-                                                                        let _ = root.send_needle(actual_next_hop, n).await;
-                                                                    }
+                                                                for n in needles {
+                                                                    m_guard.broadcast_needle(actual_next_hop, n).await;
                                                                 }
                                                             } else {
                                                                 log_rx("DTN", &format!("Маршрут к {} потерян. Сохранено в буфер.", next_hop));
@@ -298,6 +343,15 @@ impl TaigaApp {
                     }
                     if had_changes {
                         ctx_for_scan.request_repaint();
+                    }
+
+                    // Очистка старых фрагментов в мультиплексоре (Resin GC)
+                    {
+                        let mut asm = assembler_clone.lock().await;
+                        let removed = asm.clear_abandoned(std::time::Duration::from_secs(60));
+                        if removed > 0 {
+                            let _ = tx_for_scan.send(LogEvent { level: "SYSTEM".to_string(), message: format!("Resin GC: Удалено {} зависших пакетов", removed) });
+                        }
                     }
                 }
             });

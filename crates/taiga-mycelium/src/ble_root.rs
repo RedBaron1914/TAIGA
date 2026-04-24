@@ -1,45 +1,74 @@
-use crate::{Needle, Root, TreeId, TreeInfo, NodeStatus};
+use crate::{Needle, Root, TreeId, TreeInfo, RouteUpdate};
 use async_trait::async_trait;
-use btleplug::api::{Central, Manager as _, Peripheral as _, ScanFilter};
-use btleplug::platform::{Adapter, Manager};
 use std::sync::Arc;
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, mpsc};
 use uuid::Uuid;
-use std::str::FromStr;
-use lazy_static::lazy_static;
+use std::collections::HashMap;
 
-// Определяем уникальные UUID для нашей "Тайги", по которым мы будем отличать наши узлы
-// от умных часов, наушников и холодильников вокруг.
-lazy_static! {
-    /// Service UUID: "Это устройство поддерживает протокол Тайги"
-    static ref TAIGA_SERVICE_UUID: uuid::Uuid = uuid::Uuid::from_str("7A16A000-0000-4000-8000-000000000000").unwrap();
-    
-    /// Characteristic UUID: Канал для отправки "Хвоинок" (Needle) на это устройство
-    static ref TAIGA_RX_CHAR_UUID: uuid::Uuid = uuid::Uuid::from_str("7A16A001-0000-4000-8000-000000000000").unwrap();
-}
-
+/// Транспорт для Bluetooth LE. 
+/// На Android работает через JNI и системные сервисы Kotlin.
+/// На Desktop пока остается заглушкой.
+#[derive(Clone)]
 pub struct BleRoot {
-    adapter: Adapter,
     local_info: Arc<Mutex<TreeInfo>>,
     cached_id: String,
+    /// Входящие Хвоинки, полученные через JNI
+    needle_tx: mpsc::Sender<(TreeId, Needle)>,
+    needle_rx: Arc<Mutex<mpsc::Receiver<(TreeId, Needle)>>>,
+    /// Карта соответствия ID узла и его физического MAC-адреса
+    mac_map: Arc<Mutex<HashMap<TreeId, String>>>,
+    /// Список недавно обнаруженных соседей для метода discover
+    discovered_neighbors: Arc<Mutex<Vec<(TreeInfo, Vec<RouteUpdate>)>>>,
 }
 
 impl BleRoot {
-    pub async fn new(local_info: TreeInfo) -> Result<Self, String> {
-        let manager = Manager::new().await.map_err(|e| e.to_string())?;
-        
-        let adapters = manager.adapters().await.map_err(|e| e.to_string())?;
-        let adapter = adapters.into_iter().next().ok_or("Нет доступных Bluetooth-адаптеров")?;
-        
-        log::info!("[BleRoot] Bluetooth адаптер найден и подключен!");
-
+    pub fn new(local_info: TreeInfo) -> Self {
+        let (tx, rx) = mpsc::channel(1000);
         let cached_id = format!("ble-root-{}", local_info.id);
-
-        Ok(Self {
-            adapter,
+        
+        Self {
             local_info: Arc::new(Mutex::new(local_info)),
             cached_id,
-        })
+            needle_tx: tx,
+            needle_rx: Arc::new(Mutex::new(rx)),
+            mac_map: Arc::new(Mutex::new(HashMap::new())),
+            discovered_neighbors: Arc::new(Mutex::new(Vec::new())),
+        }
+    }
+
+    /// Вызывается из JNI, когда сканер нашел новое устройство
+    pub async fn add_discovered_neighbor(&self, mac: String, id: TreeId) {
+        let mut map = self.mac_map.lock().await;
+        map.insert(id, mac);
+        
+        // В реальном протоколе здесь должен быть P2P-хендшейк для обмена маршрутами.
+        // Пока просто добавляем узел как соседа с пустыми маршрутами.
+        let mut neighbors = self.discovered_neighbors.lock().await;
+        neighbors.push((
+            TreeInfo {
+                id,
+                status: crate::NodeStatus::Tree,
+                public_key: vec![], // Будет получено позже
+                freedom: crate::FreedomLevel::None,
+            },
+            vec![]
+        ));
+    }
+
+    /// Вызывается из JNI, когда получено сообщение по Bluetooth GATT
+    pub async fn inject_needle(&self, sender_mac: String, needle_bytes: Vec<u8>) {
+        if let Ok(needle) = serde_json::from_slice::<Needle>(&needle_bytes) {
+            // Пытаемся найти ID по MAC
+            let mut sender_id = Uuid::nil();
+            let map = self.mac_map.lock().await;
+            for (id, mac) in map.iter() {
+                if mac == &sender_mac {
+                    sender_id = *id;
+                    break;
+                }
+            }
+            let _ = self.needle_tx.send((sender_id, needle)).await;
+        }
     }
 }
 
@@ -53,61 +82,41 @@ impl Root for BleRoot {
         *self.local_info.lock().await = info;
     }
 
-    async fn discover(&self, _local_routes: Vec<crate::RouteUpdate>) -> Result<Vec<(TreeInfo, Vec<crate::RouteUpdate>)>, String> {
-        log::info!("[BleRoot] Начинаем BLE-сканирование Корней...");
-        
-        // ВАЖНО: Фильтруем эфир, чтобы видеть ТОЛЬКО устройства с сервисом Тайги
-        let filter = ScanFilter {
-            services: vec![*TAIGA_SERVICE_UUID]
-        };
-
-        self.adapter
-            .start_scan(filter)
-            .await
-            .map_err(|e| e.to_string())?;
-
-        // Слушаем эфир 2 секунды
-        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
-
-        let peripherals = self.adapter.peripherals().await.map_err(|e| e.to_string())?;
-        let mut neighbors = Vec::new();
-        
-        for peripheral in peripherals {
-            if let Ok(Some(props)) = peripheral.properties().await {
-                if props.services.contains(&*TAIGA_SERVICE_UUID) {
-                    log::info!("[BleRoot] Найдено Дерево по BLE: {:?}", props.local_name);
-                    
-                    // TODO: Здесь мы должны будем прочитать Advertisement Data (Manufacturer Data),
-                    // куда мы упакуем наш ID и статус. 
-                    // Пока мы просто логируем факт находки.
-                }
-            }
-        }
-
-        // Останавливаем сканирование для экономии батареи
-        let _ = self.adapter.stop_scan().await;
-
-        // Пока возвращаем пустой список, так как мы еще не внедрили P2P хендшейк по BLE
-        Ok(neighbors)
+    async fn discover(&self, _local_routes: Vec<RouteUpdate>) -> Result<Vec<(TreeInfo, Vec<RouteUpdate>)>, String> {
+        // Возвращаем накопленных за время сканирования соседей и очищаем список
+        let mut neighbors = self.discovered_neighbors.lock().await;
+        let result = neighbors.clone();
+        neighbors.clear();
+        Ok(result)
     }
 
-    async fn send_needle(&self, _to: TreeId, _needle: Needle) -> Result<(), String> {
-        // Логика для BLE:
-        // 1. Найти `Peripheral` по ID (MAC-адресу), который соответствует `to` (TreeId).
-        // 2. Если не подключены — вызвать `peripheral.connect().await`.
-        // 3. Вызвать `peripheral.discover_services().await`.
-        // 4. Найти характеристику `TAIGA_RX_CHAR_UUID`.
-        // 5. Разбить байты (ведь BLE обычно пропускает пакеты только по 20-512 байт за раз - MTU!).
-        // 6. Вызвать `peripheral.write(&char, &chunk, WriteType::WithoutResponse).await`.
-        
-        Err("Отправка Шишек по BLE требует реализации GATT Client".to_string())
+    async fn send_needle(&self, to: TreeId, needle: Needle) -> Result<(), String> {
+        #[cfg(target_os = "android")]
+        {
+            let mac_map = self.mac_map.lock().await;
+            if let Some(mac) = mac_map.get(&to) {
+                if let Ok(payload) = serde_json::to_vec(&needle) {
+                    log::info!("[BleRoot] Отправка Хвоинки на MAC: {}", mac);
+                    // Вызов через мост JNI
+                    crate::jni_bridge::send_ble_message_to_kotlin(mac, &payload);
+                    return Ok(());
+                }
+            }
+            return Err("MAC-адрес узла не найден".to_string());
+        }
+
+        #[cfg(not(target_os = "android"))]
+        {
+            Err("BLE отправка не поддерживается на этой платформе".to_string())
+        }
     }
 
     async fn receive_needle(&self) -> Result<(TreeId, Needle), String> {
-        // Заглушка. Для приема на мобилках нам понадобится поднять GATT-сервер (Peripheral).
-        // Пока вешаем бесконечное ожидание.
-        loop {
-            tokio::time::sleep(std::time::Duration::from_secs(3600)).await;
+        let mut rx = self.needle_rx.lock().await;
+        if let Some(res) = rx.recv().await {
+            Ok(res)
+        } else {
+            Err("BleRoot channel closed".to_string())
         }
     }
 

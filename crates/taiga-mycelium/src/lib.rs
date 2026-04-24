@@ -29,7 +29,7 @@ pub enum NodeStatus {
     Ranger,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum FreedomLevel {
     None,          // Только локальная Mesh-сеть (интернета нет)
     WhitelistOnly, // Жесткие гос. белые списки (работают только крупные сайты типа ya.ru)
@@ -155,8 +155,14 @@ impl RoutingTable {
             new_path.extend_from_slice(&route.path);
             
             if let Some(current_route) = self.entries.get(&target_id) {
-                if new_path.len() < current_route.path.len() {
-                    // Нашли более короткий путь
+                let new_freedom = route.target_info.freedom;
+                let current_freedom = current_route.target_info.freedom;
+                
+                let is_better = new_freedom > current_freedom || 
+                                (new_freedom == current_freedom && new_path.len() < current_route.path.len());
+
+                if is_better {
+                    // Нашли более свободный ИЛИ более короткий путь при равной свободе
                     self.entries.insert(target_id, RouteUpdate {
                         target_info: route.target_info.clone(),
                         path: new_path,
@@ -234,6 +240,13 @@ impl Mycelium {
     pub fn attach_root(&mut self, root: Box<dyn Root>) {
         self.roots.push(root);
     }
+
+    /// Отправить Хвоинку через все доступные интерфейсы (Multihoming)
+    pub async fn broadcast_needle(&self, to: TreeId, needle: Needle) {
+        for root in &self.roots {
+            let _ = root.send_needle(to, needle.clone()).await;
+        }
+    }
     
     /// Получить локальные маршруты для отправки соседям
     pub fn get_local_routes(&self) -> Vec<RouteUpdate> {
@@ -307,5 +320,39 @@ mod tests {
         assert_eq!(path[0], neighbor_id);
         assert_eq!(path[1], neighbor_id);
         assert_eq!(path[2], target_id);
+    }
+
+    #[test]
+    fn test_freedom_level_priority() {
+        let mut table = RoutingTable::new();
+        let local_id = Uuid::new_v4();
+        let target_id = Uuid::new_v4();
+        
+        let neighbor_1 = Uuid::new_v4();
+        let neighbor_2 = Uuid::new_v4();
+
+        // Узел 1 предлагает короткий маршрут, но без свободы
+        let n1_info = TreeInfo {
+            id: neighbor_1, status: NodeStatus::Tree, public_key: vec![], freedom: FreedomLevel::None,
+        };
+        let routes_1 = vec![RouteUpdate {
+            target_info: TreeInfo { id: target_id, status: NodeStatus::Tree, public_key: vec![], freedom: FreedomLevel::None },
+            path: vec![neighbor_1, target_id],
+        }];
+        table.update_from_neighbor(local_id, n1_info, &routes_1);
+        assert_eq!(table.get_next_hop(&target_id), Some(neighbor_1));
+
+        // Узел 2 предлагает длинный маршрут, но с полной свободой (Full)
+        let n2_info = TreeInfo {
+            id: neighbor_2, status: NodeStatus::Ranger, public_key: vec![], freedom: FreedomLevel::Full,
+        };
+        let routes_2 = vec![RouteUpdate {
+            target_info: TreeInfo { id: target_id, status: NodeStatus::Ranger, public_key: vec![], freedom: FreedomLevel::Full },
+            path: vec![neighbor_2, Uuid::new_v4(), target_id],
+        }];
+        table.update_from_neighbor(local_id, n2_info, &routes_2);
+
+        // Маршрут должен переключиться на Узел 2, так как свобода важнее короткого пути
+        assert_eq!(table.get_next_hop(&target_id), Some(neighbor_2));
     }
 }
