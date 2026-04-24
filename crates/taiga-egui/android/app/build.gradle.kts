@@ -19,9 +19,19 @@ android {
         }
     }
 
+    signingConfigs {
+        create("release") {
+            storeFile = file("release.keystore")
+            storePassword = "taiga123"
+            keyAlias = "taiga"
+            keyPassword = "taiga123"
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false
+            signingConfig = signingConfigs.getByName("release")
         }
     }
     compileOptions {
@@ -52,8 +62,14 @@ tasks.register<Exec>("cargoBuildArm64") {
     
     workingDir(cargoProjectDir)
     
-    // Запускаем cargo ndk -t arm64-v8a build (добавляем --release для релиза)
-    commandLine("cargo", "ndk", "-t", "arm64-v8a", "-o", "android/app/src/main/jniLibs", "build")
+    // Определяем, собирается ли релиз
+    val isRelease = gradle.startParameter.taskNames.any { it.contains("Release", ignoreCase = true) }
+    
+    if (isRelease) {
+        commandLine("cargo", "ndk", "-t", "arm64-v8a", "-o", "android/app/src/main/jniLibs", "build", "--release")
+    } else {
+        commandLine("cargo", "ndk", "-t", "arm64-v8a", "-o", "android/app/src/main/jniLibs", "build")
+    }
 }
 
 // Привязываем наш таск к процессу сборки до того, как Gradle начнет паковать APK
