@@ -3,7 +3,7 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use taiga_mycelium::{Mycelium, NodeStatus, TreeInfo, Root, Onion};
 use taiga_mycelium::udp_root::UdpRoot;
-use taiga_resin::{ResinAssembler, split_into_needles};
+use taiga_resin::ResinAssembler;
 use uuid::Uuid;
 
 pub mod proxy;
@@ -136,7 +136,7 @@ impl TaigaApp {
                 }
 
                 if let Ok(udp_root) = UdpRoot::new(port, local_info).await {
-                    let rx_root = udp_root.clone();
+                    let _rx_root = udp_root.clone();
                     let m_for_rx = m_for_spawn.clone();
                     let tx_for_rx = tx.clone();
                     let ctx_for_rx = ctx.clone();
@@ -178,11 +178,10 @@ impl TaigaApp {
                                     drop(m_lock);
                                     
                                     let mut asm = assembler_for_rx.lock().await;
-                                    if let Some(full_payload) = asm.receive_needle(needle) {
-                                        if let Ok(text) = String::from_utf8(full_payload) {
+                                    if let Some(full_payload) = asm.receive_needle(needle)
+                                        && let Ok(text) = String::from_utf8(full_payload) {
                                             log_rx("GOSSIP", &format!("Шёпот от {}: {}", sender_id.to_string().chars().take(8).collect::<String>(), text));
                                         }
-                                    }
                                 } else if needle.target_tree == local_id {
                                     drop(m_lock);
                                     let mut asm = assembler_for_rx.lock().await;
@@ -192,43 +191,39 @@ impl TaigaApp {
                                             m.crypto.decrypt(&full_encrypted_payload)
                                         };
 
-                                        match decrypted {
-                                            Ok(decrypted_bytes) => {
-                                                if let Ok(onion) = serde_json::from_slice::<Onion>(&decrypted_bytes) {
-                                                    match onion {
-                                                        Onion::Core { sender, payload } => {
-                                                            if let Ok(mesh_payload) = serde_json::from_slice::<taiga_mycelium::MeshProxyPayload>(&payload) {
-                                                                let m_ref_exit = m_for_rx.clone();
-                                                                let exit_streams_ref = exit_streams.clone();
-                                                                let tx_log_exit = tx_for_rx.clone();
-                                                                tokio::spawn(async move {
-                                                                    proxy::handle_exit_node_request(mesh_payload, sender, m_ref_exit, exit_streams_ref, tx_log_exit).await;
-                                                                });
-                                                            } else if let Ok(text) = String::from_utf8(payload) {
-                                                                log_rx("DELIVERY", &format!("Доставлен пакет от {}", sender));
+                                        if let Ok(decrypted_bytes) = decrypted
+                                            && let Ok(onion) = serde_json::from_slice::<Onion>(&decrypted_bytes) {
+                                                match onion {
+                                                    Onion::Core { sender, payload } => {
+                                                        if let Ok(mesh_payload) = serde_json::from_slice::<taiga_mycelium::MeshProxyPayload>(&payload) {
+                                                            let m_ref_exit = m_for_rx.clone();
+                                                            let exit_streams_ref = exit_streams.clone();
+                                                            let tx_log_exit = tx_for_rx.clone();
+                                                            tokio::spawn(async move {
+                                                                proxy::handle_exit_node_request(mesh_payload, sender, m_ref_exit, exit_streams_ref, tx_log_exit).await;
+                                                            });
+                                                        } else if let Ok(_text) = String::from_utf8(payload) {
+                                                            log_rx("DELIVERY", &format!("Доставлен пакет от {}", sender));
+                                                        }
+                                                    },
+                                                    Onion::Layer { next_hop, encrypted_data } => {
+                                                        let m_guard = m_for_rx.lock().await;
+                                                        if let Some(path) = m_guard.routing_table.get_path(&next_hop) {
+                                                            let actual_next_hop = path[0];
+                                                            log_rx("ROUTING", &format!("Снят слой луковицы. Пересылка к {}", actual_next_hop));
+                                                            let needles = taiga_resin::split_into_needles(&encrypted_data, actual_next_hop, 200);
+                                                            for n in needles {
+                                                                m_guard.broadcast_needle(actual_next_hop, n).await;
                                                             }
-                                                        },
-                                                        Onion::Layer { next_hop, encrypted_data } => {
-                                                            let m_guard = m_for_rx.lock().await;
-                                                            if let Some(path) = m_guard.routing_table.get_path(&next_hop) {
-                                                                let actual_next_hop = path[0];
-                                                                log_rx("ROUTING", &format!("Снят слой луковицы. Пересылка к {}", actual_next_hop));
-                                                                let needles = taiga_resin::split_into_needles(&encrypted_data, actual_next_hop, 200);
-                                                                for n in needles {
-                                                                    m_guard.broadcast_needle(actual_next_hop, n).await;
-                                                                }
-                                                            } else {
-                                                                log_rx("DTN", &format!("Маршрут к {} потерян. Сохранено в буфер.", next_hop));
-                                                                if let Some(dtn) = &m_guard.dtn {
-                                                                    let _ = dtn.store_transit_packet(next_hop, &encrypted_data);
-                                                                }
+                                                        } else {
+                                                            log_rx("DTN", &format!("Маршрут к {} потерян. Сохранено в буфер.", next_hop));
+                                                            if let Some(dtn) = &m_guard.dtn {
+                                                                let _ = dtn.store_transit_packet(next_hop, &encrypted_data);
                                                             }
                                                         }
                                                     }
                                                 }
-                                            },
-                                            Err(_) => {}
-                                        }
+                                            }
                                     }
                                 } else {
                                     // Пакет не нам, игнорируем
@@ -324,9 +319,9 @@ impl TaigaApp {
                         m_guard.routing_table.update_from_neighbor(local_id, info.clone(), &routes);
                         m_guard.known_nodes.insert(info.id, info.clone());
                         
-                        if let Some(dtn) = &m_guard.dtn {
-                            if let Ok(packets) = dtn.take_transit_packets(info.id) {
-                                if !packets.is_empty() {
+                        if let Some(dtn) = &m_guard.dtn
+                            && let Ok(packets) = dtn.take_transit_packets(info.id)
+                                && !packets.is_empty() {
                                     let _ = tx_for_scan.send(LogEvent { level: "DTN".to_string(), message: format!("Извлечено {} пакетов для {}", packets.len(), info.id) });
                                     ctx_for_scan.request_repaint();
                                     if let Some(root) = m_guard.roots.first() {
@@ -338,8 +333,6 @@ impl TaigaApp {
                                         }
                                     }
                                 }
-                            }
-                        }
                     }
                     if had_changes {
                         ctx_for_scan.request_repaint();

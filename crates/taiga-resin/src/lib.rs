@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::time::{Instant, Duration};
 use taiga_mycelium::{Needle, TreeId};
 use uuid::Uuid;
@@ -45,6 +45,12 @@ struct ConeBuffer {
 pub struct ResinAssembler {
     /// Активные буферы сборки: ключ — ID Шишки (cone_id)
     active_cones: HashMap<Uuid, ConeBuffer>,
+}
+
+impl Default for ResinAssembler {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl ResinAssembler {

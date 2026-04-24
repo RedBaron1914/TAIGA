@@ -46,8 +46,8 @@ impl UdpRoot {
         tokio::spawn(async move {
             let mut buf = [0u8; 65535];
             loop {
-                if let Ok((len, addr)) = sock_clone.recv_from(&mut buf).await {
-                    if let Ok(packet) = serde_json::from_slice::<UdpPacket>(&buf[..len]) {
+                if let Ok((len, addr)) = sock_clone.recv_from(&mut buf).await
+                    && let Ok(packet) = serde_json::from_slice::<UdpPacket>(&buf[..len]) {
                         match packet {
                             UdpPacket::DiscoverRequest(info, routes) => {
                                 let current_info = local_info_clone.lock().await.clone();
@@ -78,7 +78,6 @@ impl UdpRoot {
                             }
                         }
                     }
-                }
             }
         });
 
@@ -96,7 +95,7 @@ impl UdpRoot {
 #[async_trait]
 impl Root for UdpRoot {
     fn id(&self) -> String {
-        format!("udp-root-{}", self.local_port)
+        self.cached_id.clone()
     }
 
     async fn discover(&self, local_routes: Vec<RouteUpdate>) -> Result<Vec<(TreeInfo, Vec<RouteUpdate>)>, String> {

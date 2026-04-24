@@ -2,13 +2,19 @@ use chacha20poly1305::{
     aead::{Aead, KeyInit},
     ChaCha20Poly1305, Key, Nonce,
 };
-use rand::{RngCore, rngs::OsRng};
+use rand::rngs::OsRng;
 use x25519_dalek::{EphemeralSecret, PublicKey, StaticSecret};
 
 /// Модуль для шифрования (ECIES-подобная схема для Onion Routing)
 pub struct CryptoModule {
     secret: StaticSecret,
     pub public_key: PublicKey,
+}
+
+impl Default for CryptoModule {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl CryptoModule {
@@ -30,7 +36,7 @@ impl CryptoModule {
         let ephemeral_pub = PublicKey::from(&ephemeral_secret);
         let shared_secret = ephemeral_secret.diffie_hellman(recipient_pub);
         
-        let key = Key::from_slice(shared_secret.as_bytes()).clone();
+        let key = *Key::from_slice(shared_secret.as_bytes());
         let cipher = ChaCha20Poly1305::new(&key);
         
         let nonce = Nonce::from_slice(&[0u8; 12]); // Ephemeral key обеспечивает уникальность, nonce можно оставить нулевым
@@ -54,7 +60,7 @@ impl CryptoModule {
         let ephemeral_pub = PublicKey::from(pub_bytes);
         
         let shared_secret = self.secret.diffie_hellman(&ephemeral_pub);
-        let key = Key::from_slice(shared_secret.as_bytes()).clone();
+        let key = *Key::from_slice(shared_secret.as_bytes());
         let cipher = ChaCha20Poly1305::new(&key);
         
         let nonce = Nonce::from_slice(&[0u8; 12]);

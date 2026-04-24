@@ -1,7 +1,6 @@
 use std::path::Path;
-use redb::{Database, MultimapTableDefinition, ReadableMultimapTable};
+use redb::{Database, MultimapTableDefinition};
 use crate::TreeId;
-use uuid::Uuid;
 
 /// Имя таблицы, где мы будем хранить транзитные "Хвоинки" (Needles) для других узлов.
 /// Ключ (Key): Целевой TreeId (кому предназначается пакет).
@@ -67,6 +66,7 @@ impl DtnBuffer {
 mod tests {
     use super::*;
     use tempfile::tempdir;
+    use uuid::Uuid;
 
     #[test]
     fn test_dtn_store_and_take() {

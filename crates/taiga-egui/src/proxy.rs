@@ -4,7 +4,6 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::mpsc;
 use std::collections::HashMap;
-use uuid::Uuid;
 use taiga_mycelium::{Mycelium, Onion, MeshProxyPayload, TreeId};
 
 /// Таблица активных потоков (TCP-туннелей), ключ - stream_id
@@ -106,7 +105,7 @@ pub async fn run_socks5_server(
                 let target_tree = match exit_node_id {
                     Some(id) => id,
                     None => {
-                        let _ = log_tx.send(crate::LogEvent { level: "PROXY".into(), message: format!("Нет доступных Экзит-нод для маршрутизации!") });
+                        let _ = log_tx.send(crate::LogEvent { level: "PROXY".into(), message: "Нет доступных Экзит-нод для маршрутизации!".to_string() });
                         return;
                     }
                 };
