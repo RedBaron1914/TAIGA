@@ -248,8 +248,9 @@ impl TaigaApp {
                 let local_streams = Arc::new(Mutex::new(std::collections::HashMap::new()));
                 let m_ref_proxy = m_for_spawn.clone();
                 let tx_for_proxy = tx.clone();
+                let local_streams_for_proxy = local_streams.clone();
                 tokio::spawn(async move {
-                    proxy::run_socks5_server(1080, m_ref_proxy, local_streams, tx_for_proxy).await;
+                    proxy::run_socks5_server(1080, m_ref_proxy, local_streams_for_proxy, tx_for_proxy).await;
                 });
 
                 // Фоновый цикл сканирования
@@ -258,6 +259,7 @@ impl TaigaApp {
                 let m_for_freedom = m_for_spawn.clone();
                 let tx_for_freedom = tx.clone();
                 let ctx_for_freedom = ctx.clone();
+                let local_streams_for_freedom = local_streams.clone();
 
                 // Фоновый процесс для определения "Уровня Свободы" (FreedomLevel)
                 tokio::spawn(async move {
@@ -273,6 +275,8 @@ impl TaigaApp {
                         let has_real_uplink = taiga_mycelium::jni_bridge::has_physical_internet();
                         #[cfg(not(target_os = "android"))]
                         let has_real_uplink = true;
+
+                        let is_using_socks5 = local_streams_for_freedom.lock().await.len() > 0;
                         
                         // 1. Проверяем "Белые списки" (гос. ресурсы, крупные поисковики)
                         let has_whitelist = _client.get("https://ya.ru").send().await.is_ok();
@@ -298,9 +302,10 @@ impl TaigaApp {
                         let mut changed = false;
                         {
                             let mut m_guard = m_for_freedom.lock().await;
-                            if m_guard.local_info.freedom != new_freedom || m_guard.local_info.is_virtual_uplink != !has_real_uplink {
+                            let is_virtual = !has_real_uplink || is_using_socks5;
+                            if m_guard.local_info.freedom != new_freedom || m_guard.local_info.is_virtual_uplink != is_virtual {
                                 m_guard.local_info.freedom = new_freedom;
-                                m_guard.local_info.is_virtual_uplink = !has_real_uplink;
+                                m_guard.local_info.is_virtual_uplink = is_virtual;
                                 changed = true;
                             }
                         }
@@ -400,7 +405,8 @@ impl eframe::App for TaigaApp {
             }
         }
 
-        let header_frame = egui::Frame::side_top_panel(&ctx.style());
+        #[allow(unused_mut)]
+        let mut header_frame = egui::Frame::side_top_panel(&ctx.style());
         #[cfg(target_os = "android")]
         {
             // Отступ под "челку" (notch) и статус-бар на Android (около 35 пикселей)
