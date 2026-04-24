@@ -21,13 +21,6 @@ lazy_static! {
     pub static ref ANDROID_JVM: Arc<Mutex<Option<jni::JavaVM>>> = Arc::new(Mutex::new(None));
 }
 
-#[unsafe(no_mangle)]
-pub extern "system" fn JNI_OnLoad(vm: jni::JavaVM, _res: *mut std::ffi::c_void) -> jni::sys::jint {
-    let mut lock = ANDROID_JVM.lock().unwrap();
-    *lock = Some(vm);
-    jni::sys::JNI_VERSION_1_6
-}
-
 pub fn send_ble_message_to_kotlin(mac: &str, payload: &[u8]) {
     if let Some(vm) = ANDROID_JVM.lock().unwrap().as_ref() {
         if let Ok(mut env) = vm.attach_current_thread() {
@@ -47,6 +40,24 @@ pub fn send_ble_message_to_kotlin(mac: &str, payload: &[u8]) {
 
 pub fn get_android_node_id() -> Option<Uuid> {
     *ANDROID_NODE_ID.lock().unwrap()
+}
+
+pub fn ping_bypassing_vpn(url: &str) -> bool {
+    if let Some(vm) = ANDROID_JVM.lock().unwrap().as_ref() {
+        if let Ok(mut env) = vm.attach_current_thread() {
+            if let Ok(url_jstring) = env.new_string(url) {
+                if let Ok(result) = env.call_static_method(
+                    "com/taiga/mesh/MyceliumCore",
+                    "pingBypassingVpn",
+                    "(Ljava/lang/String;)Z",
+                    &[jni::objects::JValue::from(&url_jstring)],
+                ) {
+                    return result.z().unwrap_or(false);
+                }
+            }
+        }
+    }
+    false
 }
 
 pub fn has_physical_internet() -> bool {
@@ -71,6 +82,11 @@ pub extern "system" fn Java_com_taiga_mesh_MyceliumCore_initNodeId<'local>(
     _class: JClass<'local>,
     node_id_bytes: JByteArray<'local>,
 ) {
+    if let Ok(vm) = env.get_java_vm() {
+        let mut lock = ANDROID_JVM.lock().unwrap();
+        *lock = Some(vm);
+    }
+
     let bytes = env.convert_byte_array(&node_id_bytes).expect("Invalid byte array");
     if bytes.len() == 16 {
         if let Ok(id) = Uuid::from_slice(&bytes) {
