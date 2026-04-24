@@ -14,6 +14,13 @@ pub struct LogEvent {
     pub message: String,
 }
 
+#[derive(Clone, PartialEq)]
+pub enum Tab {
+    Dashboard,
+    Logs,
+    Settings,
+}
+
 pub struct TaigaApp {
     mycelium: Arc<Mutex<Mycelium>>,
     logs: Vec<LogEvent>,
@@ -21,6 +28,7 @@ pub struct TaigaApp {
     rx: std::sync::mpsc::Receiver<LogEvent>,
     routes: Vec<(Uuid, Uuid, u32, taiga_mycelium::FreedomLevel)>, // Target, NextHop, Hops, Freedom
     proxy_enabled: bool,
+    current_tab: Tab,
 }
 
 impl TaigaApp {
@@ -357,6 +365,7 @@ impl TaigaApp {
             rx,
             routes: Vec::new(),
             proxy_enabled: false,
+            current_tab: Tab::Dashboard,
         }
     }
 }
@@ -383,7 +392,14 @@ impl eframe::App for TaigaApp {
             }
         }
 
-        egui::TopBottomPanel::top("header").show(ctx, |ui| {
+        let mut header_frame = egui::Frame::side_top_panel(&ctx.style());
+        #[cfg(target_os = "android")]
+        {
+            // Отступ под "челку" (notch) и статус-бар на Android (около 35 пикселей)
+            header_frame.inner_margin.top = 35;
+        }
+
+        egui::TopBottomPanel::top("header").frame(header_frame).show(ctx, |ui| {
             ui.horizontal(|ui| {
                 ui.heading("TAIGA 🌲 Router Dashboard");
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -412,75 +428,85 @@ impl eframe::App for TaigaApp {
             }
         });
 
-        egui::SidePanel::left("left_panel").min_width(250.0).show(ctx, |ui| {
-            ui.heading("Интерфейсы");
-            ui.label("🟢 UDP Симуляция (Локально)");
-            ui.label("🔴 BLE Scanner / GATT Server");
-            ui.label("🔴 Wi-Fi Direct (P2P)");
-            
-            ui.separator();
-            
-            ui.heading("Локальный SOCKS5");
+        egui::TopBottomPanel::top("tabs").show(ctx, |ui| {
             ui.horizontal(|ui| {
-                if ui.checkbox(&mut self.proxy_enabled, "SOCKS5 Прокси на 127.0.0.1:1080").changed() {
-                    self.logs.push(LogEvent {
-                        level: "PROXY".to_string(),
-                        message: if self.proxy_enabled { "Прокси включен. Маршрутизация трафика в Mesh-сеть..." } else { "Прокси выключен." }.to_string()
-                    });
-                }
-            });
-
-            ui.separator();
-            
-            ui.heading("Таблица Маршрутов");
-            egui::ScrollArea::vertical().id_salt("routes_scroll").show(ui, |ui| {
-                egui::Grid::new("routing_grid").striped(true).show(ui, |ui| {
-                    ui.label("Target");
-                    ui.label("Next Hop");
-                    ui.label("Hops");
-                    ui.label("Свобода");
-                    ui.end_row();
-
-                    for (target, next_hop, hops, freedom) in &self.routes {
-                        ui.label(egui::RichText::new(&target.to_string()[0..8]).monospace());
-                        ui.label(egui::RichText::new(&next_hop.to_string()[0..8]).monospace());
-                        ui.label(hops.to_string());
-                        let freedom_text = match freedom {
-                            taiga_mycelium::FreedomLevel::None => "🚫 Локально",
-                            taiga_mycelium::FreedomLevel::WhitelistOnly => "🏛 Белые Списки",
-                            taiga_mycelium::FreedomLevel::Normal => "🌍 Вне Списков",
-                            taiga_mycelium::FreedomLevel::Full => "🚀 Полный (VPN)",
-                        };
-                        ui.label(freedom_text);
-                        ui.end_row();
-                    }
-                });
+                ui.selectable_value(&mut self.current_tab, Tab::Dashboard, "📡 Маршруты");
+                ui.selectable_value(&mut self.current_tab, Tab::Logs, "📜 Журнал");
+                ui.selectable_value(&mut self.current_tab, Tab::Settings, "⚙ Настройки");
             });
         });
 
         egui::CentralPanel::default().show(ctx, |ui| {
-            ui.heading("Системный Журнал Узла");
-            ui.separator();
-            
-            egui::ScrollArea::vertical().stick_to_bottom(true).show(ui, |ui| {
-                for log in &self.logs {
-                    let color = match log.level.as_str() {
-                        "SYSTEM" => egui::Color32::LIGHT_BLUE,
-                        "NETWORK" => egui::Color32::YELLOW,
-                        "ROUTING" => egui::Color32::LIGHT_GREEN,
-                        "PROXY" => egui::Color32::KHAKI,
-                        "DELIVERY" => egui::Color32::WHITE,
-                        "DTN" => egui::Color32::LIGHT_RED,
-                        "GOSSIP" => egui::Color32::GOLD,
-                        "WIFI" => egui::Color32::CYAN,
-                        _ => egui::Color32::GRAY,
-                    };
-                    ui.horizontal(|ui| {
-                        ui.label(egui::RichText::new(format!("[{}]", log.level)).color(color).strong());
-                        ui.label(&log.message);
+            match self.current_tab {
+                Tab::Dashboard => {
+                    ui.heading("Интерфейсы");
+                    ui.label("🟢 UDP Симуляция (Локально)");
+                    ui.label("🔴 BLE Scanner / GATT Server");
+                    ui.label("🔴 Wi-Fi Direct (P2P)");
+                    
+                    ui.separator();
+                    
+                    ui.heading("Таблица Маршрутов");
+                    egui::ScrollArea::vertical().id_salt("routes_scroll").show(ui, |ui| {
+                        egui::Grid::new("routing_grid").striped(true).show(ui, |ui| {
+                            ui.label("Target");
+                            ui.label("Next Hop");
+                            ui.label("Hops");
+                            ui.label("Свобода");
+                            ui.end_row();
+
+                            for (target, next_hop, hops, freedom) in &self.routes {
+                                ui.label(egui::RichText::new(&target.to_string()[0..8]).monospace());
+                                ui.label(egui::RichText::new(&next_hop.to_string()[0..8]).monospace());
+                                ui.label(hops.to_string());
+                                let freedom_text = match freedom {
+                                    taiga_mycelium::FreedomLevel::None => "🚫 Локально",
+                                    taiga_mycelium::FreedomLevel::WhitelistOnly => "🏛 Белые Списки",
+                                    taiga_mycelium::FreedomLevel::Normal => "🌍 Вне Списков",
+                                    taiga_mycelium::FreedomLevel::Full => "🚀 Полный (VPN)",
+                                };
+                                ui.label(freedom_text);
+                                ui.end_row();
+                            }
+                        });
                     });
                 }
-            });
+                Tab::Logs => {
+                    ui.heading("Системный Журнал Узла");
+                    ui.separator();
+                    
+                    egui::ScrollArea::vertical().stick_to_bottom(true).show(ui, |ui| {
+                        for log in &self.logs {
+                            let color = match log.level.as_str() {
+                                "SYSTEM" => egui::Color32::LIGHT_BLUE,
+                                "NETWORK" => egui::Color32::YELLOW,
+                                "ROUTING" => egui::Color32::LIGHT_GREEN,
+                                "PROXY" => egui::Color32::KHAKI,
+                                "DELIVERY" => egui::Color32::WHITE,
+                                "DTN" => egui::Color32::LIGHT_RED,
+                                "GOSSIP" => egui::Color32::GOLD,
+                                "WIFI" => egui::Color32::CYAN,
+                                _ => egui::Color32::GRAY,
+                            };
+                            ui.horizontal(|ui| {
+                                ui.label(egui::RichText::new(format!("[{}]", log.level)).color(color).strong());
+                                ui.label(&log.message);
+                            });
+                        }
+                    });
+                }
+                Tab::Settings => {
+                    ui.heading("Локальный SOCKS5");
+                    ui.horizontal(|ui| {
+                        if ui.checkbox(&mut self.proxy_enabled, "SOCKS5 Прокси на 127.0.0.1:1080").changed() {
+                            self.logs.push(LogEvent {
+                                level: "PROXY".to_string(),
+                                message: if self.proxy_enabled { "Прокси включен. Маршрутизация трафика в Mesh-сеть..." } else { "Прокси выключен." }.to_string()
+                            });
+                        }
+                    });
+                }
+            }
         });
     }
 }
