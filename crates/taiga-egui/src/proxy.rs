@@ -71,35 +71,47 @@ pub async fn run_socks5_server(
 
                 let _ = log_tx.send(crate::LogEvent { level: "PROXY".into(), message: format!("Пойман трафик на {}:{}. Ищем Экзит-ноду...", host, target_port) });
 
-                // Ищем лучшую Экзит-ноду (с максимальным FreedomLevel)
+                // Ищем лучшую Экзит-ноду (с максимальным FreedomLevel с учетом штрафа за расстояние)
                 let exit_node_id = {
                     let m = m_ref.lock().await;
-                    let mut best_node = None;
-                    let mut best_freedom = taiga_mycelium::FreedomLevel::None;
+                    let mut best_nodes = Vec::new();
+                    let mut best_score = -1000;
 
-                    // Смотрим в таблицу маршрутизации, кто имеет наибольшую свободу
+                    // Смотрим в таблицу маршрутизации
                     for (id, route) in &m.routing_table.entries {
                         let f = route.target_info.freedom;
-                        // Сравниваем Enum (упрощенно: Full > Normal > WhitelistOnly > None)
+                        let hops = route.path.len() as i32;
+                        
                         let f_score = match f {
-                            taiga_mycelium::FreedomLevel::Full => 4,
-                            taiga_mycelium::FreedomLevel::Normal => 3,
-                            taiga_mycelium::FreedomLevel::WhitelistOnly => 2,
-                            taiga_mycelium::FreedomLevel::None => 1,
+                            taiga_mycelium::FreedomLevel::Full => 34,
+                            taiga_mycelium::FreedomLevel::Normal => 30,
+                            taiga_mycelium::FreedomLevel::WhitelistOnly => 15,
+                            taiga_mycelium::FreedomLevel::None => 0,
                         };
-                        let best_score = match best_freedom {
-                            taiga_mycelium::FreedomLevel::Full => 4,
-                            taiga_mycelium::FreedomLevel::Normal => 3,
-                            taiga_mycelium::FreedomLevel::WhitelistOnly => 2,
-                            taiga_mycelium::FreedomLevel::None => 1,
-                        };
+                        
+                        // Штраф за дальность: каждый прыжок отнимает 1 балл.
+                        // Разница между Full (34) и Normal (30) теперь всего 4 балла.
+                        // Это значит, что Full-узел на расстоянии 5 прыжков (34 - 5 = 29)
+                        // проиграет Normal-узлу, который находится рядом (30 - 1 = 29).
+                        let score = f_score - hops;
 
-                        if f_score > best_score {
-                            best_freedom = f;
-                            best_node = Some(*id);
+                        if score > best_score {
+                            best_score = score;
+                            best_nodes.clear();
+                            best_nodes.push(*id);
+                        } else if score == best_score {
+                            best_nodes.push(*id);
                         }
                     }
-                    best_node
+                    
+                    if !best_nodes.is_empty() {
+                        // Балансировка нагрузки: выбираем случайную Экзит-ноду из лучших
+                        let random_val = uuid::Uuid::new_v4().as_u128() as usize;
+                        let idx = random_val % best_nodes.len();
+                        Some(best_nodes[idx])
+                    } else {
+                        None
+                    }
                 };
 
                 let target_tree = match exit_node_id {
@@ -225,12 +237,19 @@ pub async fn handle_exit_node_request(
                     // Читаем из реального TCP -> Шлем в Mesh
                     let m_ref_reader = m_ref.clone();
                     let log_tx = tx_log.clone();
+                    let exit_streams_for_throttle = exit_streams.clone();
                     tokio::spawn(async move {
                         let mut buf = [0u8; 1024];
                         loop {
                             match reader.read(&mut buf).await {
                                 Ok(0) => break,
                                 Ok(n) => {
+                                    // Мягкий Троттлинг: если потоков больше 3, добавляем искусственную задержку
+                                    let active_count = exit_streams_for_throttle.lock().await.len();
+                                    if active_count > 3 {
+                                        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+                                    }
+                                    
                                     let mesh_payload = MeshProxyPayload::Data { stream_id, data: buf[0..n].to_vec() };
                                     let _ = send_mesh_payload(&m_ref_reader, sender_id, mesh_payload).await;
                                 }
