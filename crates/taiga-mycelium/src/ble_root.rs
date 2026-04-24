@@ -90,7 +90,7 @@ impl Root for BleRoot {
         Ok(result)
     }
 
-    async fn send_needle(&self, to: TreeId, needle: Needle) -> Result<(), String> {
+    async fn send_needle(&self, #[allow(unused_variables)] to: TreeId, #[allow(unused_variables)] needle: Needle) -> Result<(), String> {
         #[cfg(target_os = "android")]
         {
             let mac_map = self.mac_map.lock().await;
