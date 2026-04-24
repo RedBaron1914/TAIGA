@@ -12,8 +12,10 @@ android {
         minSdk = 26
         targetSdk = 34
         versionCode = 1
-        versionName = "1.0"
+        versionName = "1.0.0-beta"
         
+        setProperty("archivesBaseName", "TAIGA-v${versionName}")
+
         ndk {
             abiFilters.add("arm64-v8a")
         }
