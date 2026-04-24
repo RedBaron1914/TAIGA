@@ -90,7 +90,7 @@ impl TaigaApp {
                     let ble_root = taiga_mycelium::ble_root::BleRoot::new(local_info_ble);
                     
                     // Добавляем BleRoot в список корней (клонируем)
-                    m_for_jni.lock().await.attach_root(Box::new(ble_root.clone()));
+                    m_for_jni.lock().await.attach_root(Arc::new(ble_root.clone()));
                     
                     // Слушатель для BleRoot
                     let needle_tx_ble = needle_agg_tx.clone();
@@ -114,8 +114,8 @@ impl TaigaApp {
                                         
                                         let local = m_for_jni.lock().await.local_info.clone();
                                         if let Ok(wifi_root) = taiga_mycelium::wifi_root::WifiRoot::new(local, ip, is_group_owner).await {
-                                            let root_box: Box<dyn Root> = Box::new(wifi_root.clone());
-                                            m_for_jni.lock().await.attach_root(root_box);
+                                            let root_arc: Arc<dyn Root> = Arc::new(wifi_root.clone());
+                                            m_for_jni.lock().await.attach_root(root_arc);
                                             
                                             // Слушатель для нового Wi-Fi корня
                                             let needle_tx = needle_agg_tx_jni.clone();
@@ -241,7 +241,7 @@ impl TaigaApp {
                     });
 
                     let mut m_guard = m_for_spawn.lock().await;
-                    m_guard.attach_root(Box::new(udp_root));
+                    m_guard.attach_root(Arc::new(udp_root));
                 }
                 
                 // Запуск локального SOCKS5-прокси сервера
@@ -324,38 +324,40 @@ impl TaigaApp {
 
                 loop {
                     tokio::time::sleep(std::time::Duration::from_secs(3)).await;
-                    let mut m_guard = m_for_spawn.lock().await;
-                    let local_routes = m_guard.get_local_routes();
-                    let local_id = m_guard.local_info.id;
+                    
+                    let (local_routes, local_id, roots) = {
+                        let m_guard = m_for_spawn.lock().await;
+                        (m_guard.get_local_routes(), m_guard.local_info.id, m_guard.roots.clone())
+                    };
                     
                     let mut discovered = Vec::new();
-                    for root in &m_guard.roots {
+                    for root in roots {
                         if let Ok(peers) = root.discover(local_routes.clone()).await {
                             discovered.extend(peers);
                         }
                     }
                     
                     let had_changes = !discovered.is_empty();
-                    for (info, routes) in discovered {
-                        m_guard.routing_table.update_from_neighbor(local_id, info.clone(), &routes);
-                        m_guard.known_nodes.insert(info.id, info.clone());
-                        
-                        if let Some(dtn) = &m_guard.dtn
-                            && let Ok(packets) = dtn.take_transit_packets(info.id)
-                                && !packets.is_empty() {
-                                    let _ = tx_for_scan.send(LogEvent { level: "DTN".to_string(), message: format!("Извлечено {} пакетов для {}", packets.len(), info.id) });
-                                    ctx_for_scan.request_repaint();
-                                    if let Some(root) = m_guard.roots.first() {
+                    
+                    if had_changes {
+                        let mut m_guard = m_for_spawn.lock().await;
+                        for (info, routes) in discovered {
+                            m_guard.routing_table.update_from_neighbor(local_id, info.clone(), &routes);
+                            m_guard.known_nodes.insert(info.id, info.clone());
+                            
+                            if let Some(dtn) = &m_guard.dtn
+                                && let Ok(packets) = dtn.take_transit_packets(info.id)
+                                    && !packets.is_empty() {
+                                        let _ = tx_for_scan.send(LogEvent { level: "DTN".to_string(), message: format!("Извлечено {} пакетов для {}", packets.len(), info.id) });
+                                        ctx_for_scan.request_repaint();
                                         for encrypted_payload in packets {
                                             let needles = taiga_resin::split_into_needles(&encrypted_payload, info.id, 200);
                                             for needle in needles {
-                                                let _ = root.send_needle(info.id, needle.clone()).await;
+                                                m_guard.broadcast_needle(info.id, needle.clone()).await;
                                             }
                                         }
                                     }
-                                }
-                    }
-                    if had_changes {
+                        }
                         ctx_for_scan.request_repaint();
                     }
 

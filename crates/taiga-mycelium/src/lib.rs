@@ -2,6 +2,7 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 use std::collections::{HashSet, HashMap};
+use std::sync::Arc;
 
 pub mod udp_root;
 pub mod ble_root;
@@ -149,10 +150,23 @@ impl RoutingTable {
         let neighbor_id = neighbor_info.id;
         
         // Добавляем самого соседа (расстояние 1, путь только он сам)
-        self.entries.insert(neighbor_id, RouteUpdate {
-            target_info: neighbor_info,
-            path: vec![neighbor_id],
-        });
+        // Защита от перезаписи хорошей инфы (например, от Wi-Fi) пустой инфой (от BLE-заглушки)
+        if let Some(existing) = self.entries.get(&neighbor_id) {
+            let better_info = if neighbor_info.public_key.is_empty() || neighbor_info.freedom < existing.target_info.freedom {
+                existing.target_info.clone()
+            } else {
+                neighbor_info.clone()
+            };
+            self.entries.insert(neighbor_id, RouteUpdate {
+                target_info: better_info,
+                path: vec![neighbor_id],
+            });
+        } else {
+            self.entries.insert(neighbor_id, RouteUpdate {
+                target_info: neighbor_info.clone(),
+                path: vec![neighbor_id],
+            });
+        }
 
         // Анализируем, кого знает сосед
         for route in neighbor_routes {
@@ -205,7 +219,7 @@ impl RoutingTable {
 pub struct Mycelium {
     pub local_info: TreeInfo,
     /// Активные соединения (Bluetooth, Wi-Fi, Симуляции)
-    pub roots: Vec<Box<dyn Root>>,
+    pub roots: Vec<Arc<dyn Root>>,
     /// Известные соседи в радиусе одного прыжка
     pub neighbors: HashSet<TreeId>,
     /// Таблица маршрутизации
@@ -247,7 +261,7 @@ impl Mycelium {
     }
 
     /// Подключить новый интерфейс связи (Пустить корень)
-    pub fn attach_root(&mut self, root: Box<dyn Root>) {
+    pub fn attach_root(&mut self, root: Arc<dyn Root>) {
         self.roots.push(root);
     }
 
