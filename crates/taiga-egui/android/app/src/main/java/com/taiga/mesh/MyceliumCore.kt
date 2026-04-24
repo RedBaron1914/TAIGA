@@ -1,5 +1,8 @@
 package com.taiga.mesh
 
+import android.content.Context
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import android.util.Log
 
 object MyceliumCore {
@@ -7,6 +10,23 @@ object MyceliumCore {
     
     // Ссылка на активити для обратных вызовов
     var activity: MainActivity? = null
+
+    @JvmStatic
+    fun hasPhysicalInternet(): Boolean {
+        val act = activity ?: return false
+        val cm = act.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+        val networks = cm.allNetworks
+        for (n in networks) {
+            val caps = cm.getNetworkCapabilities(n)
+            if (caps != null && 
+                caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
+                caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED) &&
+                !caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN)) {
+                return true
+            }
+        }
+        return false
+    }
 
     // Нативные функции, реализованные в Rust (jni_bridge.rs)
     

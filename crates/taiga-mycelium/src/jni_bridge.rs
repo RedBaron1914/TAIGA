@@ -49,6 +49,22 @@ pub fn get_android_node_id() -> Option<Uuid> {
     *ANDROID_NODE_ID.lock().unwrap()
 }
 
+pub fn has_physical_internet() -> bool {
+    if let Some(vm) = ANDROID_JVM.lock().unwrap().as_ref() {
+        if let Ok(mut env) = vm.attach_current_thread() {
+            if let Ok(result) = env.call_static_method(
+                "com/taiga/mesh/MyceliumCore",
+                "hasPhysicalInternet",
+                "()Z",
+                &[],
+            ) {
+                return result.z().unwrap_or(false);
+            }
+        }
+    }
+    false
+}
+
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_com_taiga_mesh_MyceliumCore_initNodeId<'local>(
     mut env: JNIEnv<'local>,
