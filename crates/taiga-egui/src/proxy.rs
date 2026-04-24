@@ -89,11 +89,14 @@ pub async fn run_socks5_server(
                             taiga_mycelium::FreedomLevel::None => 0,
                         };
                         
-                        // Штраф за дальность: каждый прыжок отнимает 1 балл.
-                        // Разница между Full (34) и Normal (30) теперь всего 4 балла.
-                        // Это значит, что Full-узел на расстоянии 5 прыжков (34 - 5 = 29)
-                        // проиграет Normal-узлу, который находится рядом (30 - 1 = 29).
-                        let score = f_score - hops;
+                        let mut score = f_score - hops;
+
+                        // Штраф за "Виртуальный интернет" (Тромбонирование)
+                        // Если узел раздает интернет, который сам получает через Mesh (VPN поверх Mesh),
+                        // мы отнимаем 10 баллов. Это сделает его выбор возможным ТОЛЬКО в крайнем случае.
+                        if route.target_info.is_virtual_uplink {
+                            score -= 10;
+                        }
 
                         if score > best_score {
                             best_score = score;

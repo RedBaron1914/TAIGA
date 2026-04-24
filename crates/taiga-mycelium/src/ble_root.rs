@@ -50,6 +50,7 @@ impl BleRoot {
                 status: crate::NodeStatus::Tree,
                 public_key: vec![], // Будет получено позже
                 freedom: crate::FreedomLevel::None,
+                is_virtual_uplink: false,
             },
             vec![]
         ));

@@ -46,6 +46,9 @@ pub struct TreeInfo {
     pub public_key: Vec<u8>, 
     /// Уровень свободы выхода в глобальную сеть
     pub freedom: FreedomLevel,
+    /// Если true, значит интернет виртуальный (туннелируется через соседей по Mesh). 
+    /// Такие узлы получают штраф при маршрутизации.
+    pub is_virtual_uplink: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -225,6 +228,7 @@ impl Mycelium {
                 status,
                 public_key: crypto.public_key.as_bytes().to_vec(),
                 freedom: FreedomLevel::None,
+                is_virtual_uplink: false,
             },
             roots: Vec::new(),
             neighbors: HashSet::new(),

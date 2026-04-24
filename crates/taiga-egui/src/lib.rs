@@ -269,6 +269,11 @@ impl TaigaApp {
                     loop {
                         let mut new_freedom = taiga_mycelium::FreedomLevel::None;
                         
+                        #[cfg(target_os = "android")]
+                        let has_real_uplink = taiga_mycelium::jni_bridge::has_physical_internet();
+                        #[cfg(not(target_os = "android"))]
+                        let has_real_uplink = true;
+                        
                         // 1. Проверяем "Белые списки" (гос. ресурсы, крупные поисковики)
                         let has_whitelist = _client.get("https://ya.ru").send().await.is_ok();
                         
@@ -293,8 +298,9 @@ impl TaigaApp {
                         let mut changed = false;
                         {
                             let mut m_guard = m_for_freedom.lock().await;
-                            if m_guard.local_info.freedom != new_freedom {
+                            if m_guard.local_info.freedom != new_freedom || m_guard.local_info.is_virtual_uplink != !has_real_uplink {
                                 m_guard.local_info.freedom = new_freedom;
+                                m_guard.local_info.is_virtual_uplink = !has_real_uplink;
                                 changed = true;
                             }
                         }
