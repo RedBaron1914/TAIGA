@@ -172,7 +172,8 @@ impl RoutingTable {
         for route in neighbor_routes {
             let target_id = route.target_info.id;
             if target_id == local_id { continue; } // Себя не добавляем
-            if route.path.contains(&local_id) { continue; } // Защита от маршрутных петель
+            if route.path.contains(&local_id) { continue; } // Защита от маршрутных петель (мы уже есть в пути)
+            if route.path.contains(&neighbor_id) { continue; } // Защита от дублирования соседа в пути
             
             let mut new_path = vec![neighbor_id];
             new_path.extend_from_slice(&route.path);
@@ -313,6 +314,7 @@ mod tests {
             status: NodeStatus::Tree,
             public_key: vec![],
             freedom: FreedomLevel::None,
+            is_virtual_uplink: false,
         };
         
         let target_id = Uuid::new_v4();
@@ -323,8 +325,9 @@ mod tests {
                     status: NodeStatus::Tree,
                     public_key: vec![],
                     freedom: FreedomLevel::None,
+                    is_virtual_uplink: false,
                 },
-                path: vec![neighbor_id, target_id],
+                path: vec![target_id],
             }
         ];
         
@@ -340,10 +343,9 @@ mod tests {
         assert_eq!(next_hop_target, neighbor_id);
         
         let path = table.get_path(&target_id).unwrap();
-        assert_eq!(path.len(), 3);
+        assert_eq!(path.len(), 2);
         assert_eq!(path[0], neighbor_id);
-        assert_eq!(path[1], neighbor_id);
-        assert_eq!(path[2], target_id);
+        assert_eq!(path[1], target_id);
     }
 
     #[test]
@@ -357,22 +359,22 @@ mod tests {
 
         // Узел 1 предлагает короткий маршрут, но без свободы
         let n1_info = TreeInfo {
-            id: neighbor_1, status: NodeStatus::Tree, public_key: vec![], freedom: FreedomLevel::None,
+            id: neighbor_1, status: NodeStatus::Tree, public_key: vec![], freedom: FreedomLevel::None, is_virtual_uplink: false,
         };
         let routes_1 = vec![RouteUpdate {
-            target_info: TreeInfo { id: target_id, status: NodeStatus::Tree, public_key: vec![], freedom: FreedomLevel::None },
-            path: vec![neighbor_1, target_id],
+            target_info: TreeInfo { id: target_id, status: NodeStatus::Tree, public_key: vec![], freedom: FreedomLevel::None, is_virtual_uplink: false },
+            path: vec![target_id],
         }];
         table.update_from_neighbor(local_id, n1_info, &routes_1);
         assert_eq!(table.get_next_hop(&target_id), Some(neighbor_1));
 
         // Узел 2 предлагает длинный маршрут, но с полной свободой (Full)
         let n2_info = TreeInfo {
-            id: neighbor_2, status: NodeStatus::Ranger, public_key: vec![], freedom: FreedomLevel::Full,
+            id: neighbor_2, status: NodeStatus::Ranger, public_key: vec![], freedom: FreedomLevel::Full, is_virtual_uplink: false,
         };
         let routes_2 = vec![RouteUpdate {
-            target_info: TreeInfo { id: target_id, status: NodeStatus::Ranger, public_key: vec![], freedom: FreedomLevel::Full },
-            path: vec![neighbor_2, Uuid::new_v4(), target_id],
+            target_info: TreeInfo { id: target_id, status: NodeStatus::Ranger, public_key: vec![], freedom: FreedomLevel::Full, is_virtual_uplink: false },
+            path: vec![Uuid::new_v4(), target_id],
         }];
         table.update_from_neighbor(local_id, n2_info, &routes_2);
 
