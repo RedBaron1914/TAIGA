@@ -1,38 +1,48 @@
-# План развития проекта TAIGA 🌲 (Roadmap)
+# TAIGA Roadmap 🌲
 
-Разработка разбита на этапы, отражающие рост нашего "леса".
+Project development is divided into stages reflecting the growth of our "forest."
 
-### v0.1.0: "Росток" (Seedling) — Симуляция и Базовый транспорт
-* [x] Определение архитектуры, терминологии и структуры воркспейса (Core + Tauri).
-* [x] Реализация `UdpRoot` — симулятора локальных Корней поверх UDP для тестирования на одном ПК.
-* [x] Базовый UI на Tauri: отображение своего статуса (Дерево/Просвет), списка найденных соседей.
-* [x] Простая передача цельных сообщений (1 Шишка = 1 Хвоинка) между симулированными узлами.
+### v0.1.0: "Seedling" (Росток) — Simulation & Core
+* [x] Definition of architecture, terminology, and workspace structure (Initial Core).
+* [x] Implementation of `UdpRoot` — local UDP simulator for testing.
+* [x] Basic UI prototype: node status display (Tree/Clearing) and neighbor list.
+* [x] Basic message transfer between simulated nodes.
 
-### v0.2.0: "Смола" (Resin) — Мультиплексирование
-* [x] Разработка крейта `taiga-resin` (Смола/Живица).
-* [x] Реализация логики нарезки больших пакетов (Шишек) на фрагменты (Хвою).
-* [x] Реализация логики сборки и контроля последовательности (Sequence) на принимающей стороне.
-* [x] Тестирование отправки данных через несколько параллельных UDP-Корней одновременно.
+### v0.2.0: "Resin" (Смола) — Multiplexing
+* [x] Development of the `taiga-resin` crate.
+* [x] Logic for fragmenting large packets (Cones) into needles.
+* [x] Assembly logic and sequence control on the receiving side.
+* [x] Support for parallel roots transmission.
 
-### v0.3.0: "Корни" (Roots) — Физический уровень (Bluetooth LE)
-* [x] Интеграция крейта `btleplug` для работы с Bluetooth на десктопе.
-* [x] Настройка разрешений и нативного кода для Android (через Tauri плагины).
-* [ ] Успешный поиск (Discovery) реальных устройств по Bluetooth в комнате.
-* [ ] Передача небольших текстовых пакетов через BLE.
+### v0.3.0: "Roots" (Корни) — Physical Layer
+* [x] Integration of `btleplug` for desktop.
+* [x] Native Android BLE GATT Server/Client implementation via Kotlin and JNI.
+* [x] Successful Discovery of real devices via Bluetooth.
+* [x] Bidirectional BLE bridge between Rust and Kotlin.
 
-### v0.4.0: "Мицелий" (Mycelium) — Маршрутизация (Mesh Routing)
-* [x] Внедрение алгоритма графовой маршрутизации (наподобие BATMAN или AODV) в `taiga-mycelium`.
-* [x] Узлы должны уметь строить "Тропы" (Trails) — маршруты в несколько прыжков.
-* [x] Поиск "Просветов" (Exit Nodes) — узлов с флагом `has_internet=true`.
+### v0.4.0: "Mycelium" (Мицелий) — Mesh Routing
+* [x] Implementation of Path Vector routing in `taiga-mycelium`.
+* [x] Multihoming: simultaneous traffic aggregation across BLE, WiFi, and UDP.
+* [x] DTN (Delay-Tolerant Networking) Store-and-Forward persistent buffer using `redb`.
+* [x] Identification of "Clearing" (Exit) nodes based on "Freedom Levels."
 
-### v0.5.0: "Крона" (Canopy) — Выход в глобальную сеть
-* [x] Реализация логики Экзит-ноды: прием проксируемых запросов от Mesh-сети.
-* [x] Отправка запросов в настоящий интернет (HTTP/TCP) от лица Экзит-ноды.
-* [x] Возврат ответа по выстроенной "Тропе" обратно к запрашивающему "Дереву".
-* [x] End-to-End шифрование (E2EE) "Шишек", чтобы Экзит-нода не видела содержимое трафика.
+### v0.5.0: "Canopy" (Крона) — Global Exit
+* [x] Realization of Exit Node logic: proxying Mesh requests to the real internet.
+* [x] End-to-End Encryption (E2EE) using ECIES (x25519 + Chacha20Poly1305).
+* [x] Onion Routing: transit nodes only see the next hop.
+* [x] Smart route selection: prioritizing high "Freedom Levels" with distance penalties.
 
-### v1.0.0: "Тайга" (Taiga) — Оптимизация и Релиз
-* [ ] Переход от Tauri (прототип) на чистый Rust UI (например, `egui`, `iced` или `makepad`) для экстремальной легковесности и снижения потребления батареи на мобильных устройствах.
-* [ ] Подключение Wi-Fi Direct / Aware для передачи тяжелых данных (агрегация BLE + WiFi).
-* [ ] Нативная интеграция Android Bluetooth GATT-сервера без прослоек WebView.
-* [ ] Стабильные релизы под Android (APK), Windows (.exe), Linux.
+### v1.0.0: "Taiga" (Тайга) — Production Hardening & Release
+* [x] **UI Overhaul:** Fully migrated from Tauri to pure Rust `egui` for performance.
+* [x] **Secure Tunneling:** Full bidirectional SOCKS5 proxy server over Mesh.
+* [x] **Anti-Hairpinning:** Automatic detection and penalization of virtual (tunneled) uplinks.
+* [x] **Stability:** Resolved JNI deadlocks, memory leaks, and storage leaks.
+* [x] **Identity:** Persistent Node UUIDs stored in Android SharedPreferences.
+* [x] **Android Release:** Signed, optimized release APK with custom cyber-branding.
+
+### v1.1.0+: Future Growth
+* [ ] **Bincode Serialization:** Replace JSON with binary format for 40% less radio airtime.
+* [ ] **Forward Secrecy:** Ephemeral key exchange per stream session.
+* [ ] **Traffic Masking:** Fixed-size packet padding to obscure metadata.
+* [ ] **Proof-of-Work (PoW):** Anti-spam protection for route announcements.
+* [ ] **Trust Scores:** Decentralized reputation system to isolate malicious nodes.
