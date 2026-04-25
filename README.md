@@ -3,11 +3,11 @@
 **TAIGA** is an experimental decentralized P2P Mesh network protocol and proxy transport designed to bypass censorship, white-lists, and internet shutdowns in dense urban environments using Bluetooth LE and Wi-Fi Direct.
 
 > [!WARNING]
-> **EXPERIMENTAL PROTOCOL:** This is a Proof-of-Concept (beta) version. It lacks advanced protection against Sybil attacks, packet flooding, and malicious nodes. It is intended for research and testing of decentralized routing and E2EE transport. Do not use for mission-critical or life-threatening communication.
+> **EXPERIMENTAL PROTOCOL:** This is a Proof-of-Concept (beta) version. It lacks advanced protection against Sybil attacks, packet flooding, and malicious nodes(for now). It is intended for research and testing of decentralized routing and E2EE transport. Do not use for mission-critical or life-threatening communication.
 
 ## Key Features
 
-1.  **Freedom-Level Aware Routing:** The network automatically assesses the internet accessibility of each node (None, Whitelist-only, Normal, or Full VPN access). The routing engine prioritizes paths through nodes with higher "Freedom Levels" while accounting for a distance (hop-count) penalty.
+1.  **Freedom-Level Aware Routing:** The network automatically assesses the internet accessibility of each node (None, Whitelist-only, Normal, or Full((At least In Russian realities)) VPN access). The routing engine prioritizes paths through nodes with higher "Freedom Levels" while accounting for a distance (hop-count) penalty.
 2.  **SOCKS5 Over Mesh:** TAIGA provides a local SOCKS5 proxy (default: `127.0.0.1:1080`). Any application (Telegram, Browser, VPN client) can tunnel traffic into the Mesh. TAIGA fragments, encrypts, and routes these streams blindly through the network to the most capable Exit Node.
 3.  **Onion & Garlic Routing:** Payloads are multi-layer encrypted using ECIES (`x25519` and `chacha20poly1305`). Transit nodes can only see the next hop ID; they cannot read the payload or determine the ultimate sender/receiver.
 4.  **Delay-Tolerant Networking (DTN):** Features a persistent Store-and-Forward buffer powered by `redb`. If a destination node is out of range, encrypted packets are stored on disk and delivered automatically when connectivity is restored.

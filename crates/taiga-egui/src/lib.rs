@@ -395,12 +395,26 @@ impl TaigaApp {
                         ctx_for_scan.request_repaint();
                     }
 
-                    // Очистка старых фрагментов в мультиплексоре (Resin GC)
+                    // Очистка старых фрагментов в мультиплексоре (Resin GC) и Маршрутов
                     {
                         let mut asm = assembler_clone.lock().await;
                         let removed = asm.clear_abandoned(std::time::Duration::from_secs(60));
                         if removed > 0 {
                             let _ = tx_for_scan.send(LogEvent { level: "SYSTEM".to_string(), message: format!("Resin GC: Удалено {} зависших пакетов", removed) });
+                        }
+                        
+                        let mut m_guard = m_for_spawn.lock().await;
+                        let stale_routes = m_guard.routing_table.cleanup_stale_routes(300); // 5 минут TTL
+                        if stale_routes > 0 {
+                            let _ = tx_for_scan.send(LogEvent { level: "ROUTING".to_string(), message: format!("Очищено {} мертвых маршрутов", stale_routes) });
+                        }
+                        
+                        if let Some(dtn) = &m_guard.dtn {
+                            if let Ok(removed_dtn) = dtn.cleanup_expired() {
+                                if removed_dtn > 0 {
+                                    let _ = tx_for_scan.send(LogEvent { level: "DTN".to_string(), message: format!("Очищено {} протухших пакетов", removed_dtn) });
+                                }
+                            }
                         }
                     }
                 }
@@ -434,7 +448,7 @@ impl eframe::App for TaigaApp {
         if let Ok(m) = self.mycelium.try_lock() {
             self.local_info = Some(m.local_info.clone());
             self.routes.clear();
-            for (target_id, route) in &m.routing_table.entries {
+            for (target_id, (route, _)) in &m.routing_table.entries {
                 let next_hop = route.path.first().cloned().unwrap_or(Uuid::nil());
                 let hops = route.path.len() as u32;
                 let freedom = route.target_info.freedom;
