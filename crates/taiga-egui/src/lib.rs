@@ -29,13 +29,15 @@ pub struct TaigaApp {
     routes: Vec<(Uuid, Uuid, u32, taiga_mycelium::FreedomLevel)>, // Target, NextHop, Hops, Freedom
     proxy_enabled: bool,
     current_tab: Tab,
+    cmd_tx: tokio::sync::mpsc::UnboundedSender<String>,
 }
 
 impl TaigaApp {
-    pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
+    pub fn new(cc: &eframe::CreationContext<'_>, app_data_dir: std::path::PathBuf) -> Self {
         cc.egui_ctx.set_visuals(egui::Visuals::dark());
 
         let (tx, rx) = std::sync::mpsc::channel();
+        let (cmd_tx, mut cmd_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
         let port: u16 = (rand::random::<u16>() % 21) + 40000; 
 
         #[cfg(target_os = "android")]
@@ -45,7 +47,6 @@ impl TaigaApp {
 
         let mut m = Mycelium::new(id, NodeStatus::Tree);
         
-        let app_data_dir = std::path::PathBuf::from(".taiga_data");
         let _ = std::fs::create_dir_all(&app_data_dir);
         let dtn_path = app_data_dir.join(format!("taiga_dtn_{}.redb", id));
         if let Err(e) = m.init_dtn(&dtn_path) {
@@ -143,6 +144,8 @@ impl TaigaApp {
                     });
                 }
 
+                let local_streams: proxy::StreamMap = Arc::new(Mutex::new(std::collections::HashMap::new()));
+
                 if let Ok(udp_root) = UdpRoot::new(port, local_info).await {
                     let _rx_root = udp_root.clone();
                     let m_for_rx = m_for_spawn.clone();
@@ -167,9 +170,10 @@ impl TaigaApp {
                         }
                     });
                     
-                    let exit_streams = Arc::new(Mutex::new(std::collections::HashMap::new()));
+                    let exit_streams: proxy::StreamMap = Arc::new(Mutex::new(std::collections::HashMap::new()));
                     
                     let assembler_for_rx = assembler_clone.clone();
+                    let local_streams_for_rx = local_streams.clone();
                     tokio::spawn(async move {
                         let mut seen_needles = std::collections::HashSet::new();
                         loop {
@@ -206,9 +210,30 @@ impl TaigaApp {
                                                         if let Ok(mesh_payload) = serde_json::from_slice::<taiga_mycelium::MeshProxyPayload>(&payload) {
                                                             let m_ref_exit = m_for_rx.clone();
                                                             let exit_streams_ref = exit_streams.clone();
+                                                            let local_streams_ref = local_streams_for_rx.clone();
                                                             let tx_log_exit = tx_for_rx.clone();
                                                             tokio::spawn(async move {
-                                                                proxy::handle_exit_node_request(mesh_payload, sender, m_ref_exit, exit_streams_ref, tx_log_exit).await;
+                                                                match mesh_payload {
+                                                                    taiga_mycelium::MeshProxyPayload::Data { stream_id, data } => {
+                                                                        let mut locals = local_streams_ref.lock().await;
+                                                                        if let Some(tx) = locals.get_mut(&stream_id) {
+                                                                            let _ = tx.send(data).await;
+                                                                            return;
+                                                                        }
+                                                                        drop(locals);
+                                                                        let mut exits = exit_streams_ref.lock().await;
+                                                                        if let Some(tx) = exits.get_mut(&stream_id) {
+                                                                            let _ = tx.send(data).await;
+                                                                        }
+                                                                    }
+                                                                    taiga_mycelium::MeshProxyPayload::Close { stream_id } => {
+                                                                        local_streams_ref.lock().await.remove(&stream_id);
+                                                                        exit_streams_ref.lock().await.remove(&stream_id);
+                                                                    }
+                                                                    _ => {
+                                                                        proxy::handle_exit_node_request(mesh_payload, sender, m_ref_exit, exit_streams_ref, tx_log_exit).await;
+                                                                    }
+                                                                }
                                                             });
                                                         } else if let Ok(_text) = String::from_utf8(payload) {
                                                             log_rx("DELIVERY", &format!("Доставлен пакет от {}", sender));
@@ -245,7 +270,6 @@ impl TaigaApp {
                 }
                 
                 // Запуск локального SOCKS5-прокси сервера
-                let local_streams = Arc::new(Mutex::new(std::collections::HashMap::new()));
                 let m_ref_proxy = m_for_spawn.clone();
                 let tx_for_proxy = tx.clone();
                 let local_streams_for_proxy = local_streams.clone();
@@ -322,6 +346,16 @@ impl TaigaApp {
                     }
                 });
 
+                let m_for_cmd = m_for_spawn.clone();
+                tokio::spawn(async move {
+                    while let Some(cmd) = cmd_rx.recv().await {
+                        if cmd == "ROTATE_BARK" {
+                            let mut m = m_for_cmd.lock().await;
+                            m.rotate_bark().await;
+                        }
+                    }
+                });
+
                 loop {
                     tokio::time::sleep(std::time::Duration::from_secs(3)).await;
                     
@@ -381,6 +415,7 @@ impl TaigaApp {
             routes: Vec::new(),
             proxy_enabled: false,
             current_tab: Tab::Dashboard,
+            cmd_tx,
         }
     }
 }
@@ -420,14 +455,7 @@ impl eframe::App for TaigaApp {
                 ui.heading("TAIGA 🌲 Router Dashboard");
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if ui.button("🔄 Сбросить Кору").clicked() {
-                        let m_ref = self.mycelium.clone();
-                        std::thread::spawn(move || {
-                            let rt = tokio::runtime::Runtime::new().unwrap();
-                            rt.block_on(async move {
-                                let mut m = m_ref.lock().await;
-                                m.rotate_bark().await;
-                            });
-                        });
+                        let _ = self.cmd_tx.send("ROTATE_BARK".to_string());
                         self.logs.push(LogEvent { level: "SYSTEM".to_string(), message: "Кора сброшена! Новый ID сгенерирован.".to_string() });
                     }
                 });
@@ -535,12 +563,14 @@ pub fn android_main(app: android_activity::AndroidApp) {
             .with_max_level(log::LevelFilter::Info),
     );
 
+    let data_dir = app.internal_data_path().unwrap_or_else(|| std::path::PathBuf::from(".taiga_data"));
+
     let mut options = eframe::NativeOptions::default();
     options.android_app = Some(app);
 
     let _ = eframe::run_native(
         "TAIGA",
         options,
-        Box::new(|cc| Ok(Box::new(TaigaApp::new(cc)))),
+        Box::new(move |cc| Ok(Box::new(TaigaApp::new(cc, data_dir)))),
     );
 }
