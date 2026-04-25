@@ -1,64 +1,71 @@
 # TAIGA (Тайга) 🌲
 
-**TAIGA** — это концепт децентрализованной, устойчивой к блокировкам P2P Mesh-сети, предназначенной для обхода "белых списков" провайдеров и шатдаунов интернета в условиях плотной городской застройки.
+**TAIGA** is an experimental decentralized P2P Mesh network protocol and proxy transport designed to bypass censorship, white-lists, and internet shutdowns in dense urban environments using Bluetooth LE and Wi-Fi Direct.
 
-## 📖 Основная концепция
+> [!WARNING]
+> **EXPERIMENTAL PROTOCOL:** This is a Proof-of-Concept (beta) version. It lacks advanced protection against Sybil attacks, packet flooding, and malicious nodes. It is intended for research and testing of decentralized routing and E2EE transport. Do not use for mission-critical or life-threatening communication.
 
-Когда прямой доступ к глобальной сети блокируется или ограничивается (например, работают только сайты из государственного "белого списка"), устройства граждан могут образовывать плотную локальную сеть (Mesh) с помощью беспроводных протоколов малого радиуса действия (Bluetooth LE, Wi-Fi Direct).
+## Key Features
 
-Особенности TAIGA:
-1. **Динамические "Экзит-ноды" (Уровни Свободы):** Сеть автоматически оценивает уровень "свободы" каждого узла (от изоляции до полного VPN-доступа) и строит маршруты через наиболее свободные узлы.
-2. **SOCKS5 over Mesh:** Любое приложение (Telegram, браузер) может подключиться к локальному порту Тайги (127.0.0.1:1080). Весь трафик будет нарезан на фрагменты, зашифрован и передан по Mesh-сети к Экзит-ноде, которая выпустит его в интернет.
-3. **Garlic Routing (Луковая маршрутизация):** Сообщения многократно шифруются (ECIES). Транзитные узлы не могут прочитать трафик и не знают конечного получателя.
-4. **DTN Буфер (Store-and-Forward):** Если связь в радиоэфире обрывается, транзитный узел сохраняет зашифрованные пакеты на диск (в БД `redb`) и доставляет их, когда получатель снова появится в радиусе действия.
-5. **Агрегирование и Мультиплексирование:** Данные нарезаются на мельчайшие куски ("Хвоинки"), способные протиснуться через Bluetooth-каналы с низким MTU, или улететь на высоких скоростях через Wi-Fi Direct.
+1.  **Freedom-Level Aware Routing:** The network automatically assesses the internet accessibility of each node (None, Whitelist-only, Normal, or Full VPN access). The routing engine prioritizes paths through nodes with higher "Freedom Levels" while accounting for a distance (hop-count) penalty.
+2.  **SOCKS5 Over Mesh:** TAIGA provides a local SOCKS5 proxy (default: `127.0.0.1:1080`). Any application (Telegram, Browser, VPN client) can tunnel traffic into the Mesh. TAIGA fragments, encrypts, and routes these streams blindly through the network to the most capable Exit Node.
+3.  **Onion & Garlic Routing:** Payloads are multi-layer encrypted using ECIES (`x25519` and `chacha20poly1305`). Transit nodes can only see the next hop ID; they cannot read the payload or determine the ultimate sender/receiver.
+4.  **Delay-Tolerant Networking (DTN):** Features a persistent Store-and-Forward buffer powered by `redb`. If a destination node is out of range, encrypted packets are stored on disk and delivered automatically when connectivity is restored.
+5.  **Multi-Transport Aggregation:** Simultaneous support for UDP (simulation), Bluetooth LE (GATT), and Wi-Fi Direct. The core aggregates traffic from all active roots for maximum reliability.
 
-## 🛠 Технический стек
+## Architecture
 
-* **Core (Ядро):** `Rust` — для экстремальной производительности, безопасной работы с памятью и сложной криптографии (`x25519-dalek`, `chacha20poly1305`).
-* **UI (Интерфейс):** `egui` (eframe) — чистый, сверхбыстрый Rust UI. Компилируется в нативный код, рендерится через OpenGL/Vulkan, не требует тяжелых браузерных движков (WebView) и мгновенно запускается на старых смартфонах.
-* **Транспорт:**
-  * **UDP:** Для локальной симуляции на ПК при разработке.
-  * **Android BLE:** Написан нативный Kotlin-сервис для фонового Bluetooth LE Advertising и GATT Server, общающийся с Rust через JNI.
-  * **Android Wi-Fi Direct:** P2P-подключения между устройствами с передачей TCP-сокетов напрямую в Rust.
+*   **taiga-mycelium:** Core P2P routing table, ECIES cryptography, JNI bridge for Android hardware, and DTN storage.
+*   **taiga-resin:** Multiplexer/De-multiplexer for fragmenting large binary streams into small needles for low-MTU transports.
+*   **taiga-egui:** Pure Rust UI built with `egui` and `eframe`, featuring the SOCKS5 server implementation and Android GameActivity integration.
 
-## 🌿 Брендировка и Терминология (Лор)
+## Getting Started
 
-Чтобы сложные сетевые термины стали интуитивно понятными, мы используем метафору "Тайги" — густого, непроходимого леса, где всё связано невидимой сетью корней.
-
-### Узлы сети (Nodes)
-* **Дерево (Tree) / Кедр (Cedar)** — Обычный клиентский узел без интернета.
-* **Просвет (Clearing) / Крона (Canopy)** — Экзит-нода с доступом в глобальную сеть.
-* **Проводник (Ranger) / Ветер (Wind)** — Транзитный узел, передающий трафик.
-
-### Связи и Топология (Routing)
-* **Корни (Roots)** — Локальные соединения между устройствами (BLE / Wi-Fi).
-* **Мицелий (Mycelium)** — P2P-протокол маршрутизации (Path Vector) и поиска соседей.
-* **Тропа (Trail)** — Маршрут в несколько прыжков (hops) от *Дерева* до *Просвета*.
-
-### Данные и Пакеты (Data)
-* **Шишки (Cones)** — Цельные, многослойно зашифрованные (Onion) пакеты данных.
-* **Хвоя (Needles) / Семена (Seeds)** — Фрагментированные части пакета.
-* **Живица / Смола (Resin / Sap)** — Алгоритм мультиплексора на выходе, который склеивает *Хвою* обратно в *Шишку*.
-* **Шёпот Леса (Gossip)** — Широковещательный протокол (Broadcast) для экстренной передачи сообщений всем соседям без жестких маршрутов.
-
-## 🏗 Структура проекта
-
-* `crates/taiga-mycelium` — Модуль P2P-маршрутизации (Mesh), Discovery (Bluetooth/WiFi), луковой криптографии (ECIES) и DTN-хранилища (redb).
-* `crates/taiga-resin` — Модуль мультиплексирования (нарезка TCP сессий на *Хвою* и их сборка).
-* `crates/taiga-egui` — Десктопный и мобильный (через GameActivity) UI-клиент, включающий реализацию локального SOCKS5-прокси.
-  * `crates/taiga-egui/android` — Проект для сборки нативного Android APK с Kotlin-кодом для управления радиомодулями.
-
-## 🚀 Как запустить (Десктоп симуляция)
-Убедитесь, что у вас установлен Rust.
+### Desktop (Simulation)
+Run multiple instances on the same local network to test routing and DTN:
 ```bash
-cargo run -p taiga-egui
+cargo run -p taiga-egui --release
 ```
-Запустите несколько окон на одном ПК, чтобы они автоматически нашли друг друга по локальному UDP, выстроили маршруты и начали обмениваться ключами.
 
-## 📱 Сборка для Android
-Для сборки под Android (arm64-v8a) потребуется установленный NDK и `cargo-ndk`.
+### Android
+Requires NDK and `cargo-ndk`.
 ```bash
 cd crates/taiga-egui/android
-./gradlew assembleDebug
+./gradlew assembleRelease
+```
+
+---
+
+**TAIGA** — это экспериментальный децентрализованный P2P Mesh-протокол и прокси-транспорт, предназначенный для обхода цензуры, «белых списков» и шатдаунов интернета в условиях плотной городской застройки с использованием Bluetooth LE и Wi-Fi Direct.
+
+> [!WARNING]
+> **ЭКСПЕРИМЕНТАЛЬНЫЙ ПРОТОКОЛ:** Данная версия является Proof-of-Concept (бета). В ней отсутствуют развитые механизмы защиты от Sybil-атак, флуда и вредоносных узлов. Проект предназначен для исследовательских целей и тестирования алгоритмов маршрутизации и E2EE-транспорта. Не используйте для передачи критически важной информации в реальных условиях.
+
+## Основные возможности
+
+1.  **Маршрутизация на основе «Уровней Свободы»:** Сеть автоматически оценивает доступность интернета у каждого узла (от полной изоляции до полного VPN-доступа). Движок маршрутизации отдает приоритет узлам с более высоким уровнем доступа, учитывая штраф за расстояние (количество прыжков).
+2.  **SOCKS5 over Mesh:** Тайга поднимает локальный SOCKS5-прокси (`127.0.0.1:1080`). Любое приложение (Telegram, браузер, VPN-клиент) может направлять трафик в Mesh-сеть. Тайга фрагментирует, шифрует и «вслепую» передает эти потоки через сеть к наиболее подходящей Экзит-ноде.
+3.  **Луковая маршрутизация (Onion & Garlic):** Данные многократно шифруются с использованием ECIES (`x25519` и `chacha20poly1305`). Транзитные узлы видят только ID следующего прыжка; они не могут прочитать содержимое или определить конечного отправителя/получателя.
+4.  **Устойчивость к разрывам (DTN):** Персистентный буфер Store-and-Forward на базе БД `redb`. Если узел-получатель вне зоны доступа, зашифрованные пакеты сохраняются на диске и доставляются автоматически при восстановлении связи.
+5.  **Агрегация транспортов (Multihoming):** Одновременная поддержка UDP (симуляция), Bluetooth LE (GATT) и Wi-Fi Direct. Ядро объединяет трафик со всех активных интерфейсов для максимальной надежности.
+
+## Структура проекта
+
+*   **taiga-mycelium:** Ядро P2P-маршрутизации, криптография ECIES, JNI-мост для Android и DTN-хранилище.
+*   **taiga-resin:** Мультиплексор для нарезки больших бинарных потоков на мелкие фрагменты («хвою») для передачи по каналам с низким MTU.
+*   **taiga-egui:** Пользовательский интерфейс на чистом Rust (`egui`/`eframe`), включающий SOCKS5-сервер и интеграцию с Android GameActivity.
+
+## Как запустить
+
+### Десктоп (Симуляция)
+Запустите несколько экземпляров в одной локальной сети для тестирования маршрутизации:
+```bash
+cargo run -p taiga-egui --release
+```
+
+### Android
+Требуется установленный NDK и `cargo-ndk`.
+```bash
+cd crates/taiga-egui/android
+./gradlew assembleRelease
 ```
