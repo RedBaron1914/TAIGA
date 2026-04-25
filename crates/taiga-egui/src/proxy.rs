@@ -5,9 +5,10 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::mpsc;
 use std::collections::HashMap;
 use taiga_mycelium::{Mycelium, Onion, MeshProxyPayload, TreeId};
+use uuid::Uuid;
 
 /// Таблица активных потоков (TCP-туннелей), ключ - stream_id
-pub type StreamMap = Arc<Mutex<HashMap<u32, tokio::sync::mpsc::Sender<Vec<u8>>>>>;
+pub type StreamMap = Arc<Mutex<HashMap<Uuid, tokio::sync::mpsc::Sender<Vec<u8>>>>>;
 
 pub async fn run_socks5_server(
     port: u16,
@@ -23,15 +24,13 @@ pub async fn run_socks5_server(
         }
     };
     
-    let mut next_stream_id = 1u32;
     let _ = tx_log.send(crate::LogEvent { level: "PROXY".into(), message: format!("Локальный SOCKS5 прокси запущен на 127.0.0.1:{}", port) });
 
     loop {
         if let Ok((mut stream, _)) = listener.accept().await {
             let m_ref = mycelium.clone();
             let streams_ref = local_streams.clone();
-            let stream_id = next_stream_id;
-            next_stream_id += 1;
+            let stream_id = Uuid::new_v4();
             let log_tx = tx_log.clone();
 
             tokio::spawn(async move {
@@ -78,7 +77,7 @@ pub async fn run_socks5_server(
                     let mut best_score = -1000;
 
                     // Смотрим в таблицу маршрутизации
-                    for (id, route) in &m.routing_table.entries {
+                    for (id, (route, _)) in &m.routing_table.entries {
                         let f = route.target_info.freedom;
                         let hops = route.path.len() as i32;
                         
@@ -189,10 +188,12 @@ pub async fn send_mesh_payload(m_ref: &Arc<Mutex<Mycelium>>, target_id: TreeId, 
 
     for i in (0..path.len()).rev() {
         let node_id = path[i];
-        let node_info = m.known_nodes.get(&node_id).ok_or("Неизвестный узел в маршруте")?;
-        let pub_key = x25519_dalek::PublicKey::from(
-            <[u8; 32]>::try_from(node_info.public_key.as_slice()).unwrap()
-        );
+        let node_info = m.routing_table.get_info(&node_id)
+            .or_else(|| m.known_nodes.get(&node_id).cloned())
+            .ok_or("Неизвестный узел в маршруте")?;
+        let pub_key_bytes = <[u8; 32]>::try_from(node_info.public_key.as_slice())
+            .map_err(|_| "Неверная длина публичного ключа у узла".to_string())?;
+        let pub_key = x25519_dalek::PublicKey::from(pub_key_bytes);
 
         let encrypted = m.crypto.encrypt(&pub_key, &current_data)?;
 
@@ -259,6 +260,7 @@ pub async fn handle_exit_node_request(
                                 Err(_) => break,
                             }
                         }
+                        exit_streams_for_throttle.lock().await.remove(&stream_id);
                         let _ = log_tx.send(crate::LogEvent { level: "EXIT".into(), message: format!("Поток {} закрыт удаленным сервером", stream_id) });
                         let _ = send_mesh_payload(&m_ref_reader, sender_id, MeshProxyPayload::Close { stream_id }).await;
                     });

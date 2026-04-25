@@ -61,11 +61,11 @@ pub struct RouteUpdate {
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub enum MeshProxyPayload {
     /// Запрос от клиента к Экзит-ноде: Открой TCP-соединение до этого хоста и порта
-    Connect { stream_id: u32, host: String, port: u16 },
+    Connect { stream_id: Uuid, host: String, port: u16 },
     /// Трансляция байт в обе стороны
-    Data { stream_id: u32, data: Vec<u8> },
+    Data { stream_id: Uuid, data: Vec<u8> },
     /// Закрытие соединения
-    Close { stream_id: u32 },
+    Close { stream_id: Uuid },
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -79,11 +79,11 @@ pub enum Onion {
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub enum MeshPayload {
     /// Запрос на открытие TCP-соединения на Exit Node
-    Connect { stream_id: u32, host: String, port: u16 },
+    Connect { stream_id: Uuid, host: String, port: u16 },
     /// Данные для существующего потока
-    Data { stream_id: u32, data: Vec<u8> },
+    Data { stream_id: Uuid, data: Vec<u8> },
     /// Закрытие потока
-    Close { stream_id: u32 },
+    Close { stream_id: Uuid },
 }
 
 /// Фрагментированный пакет данных (Хвоинка).
@@ -129,7 +129,7 @@ pub trait Root: Send + Sync {
 /// Таблица маршрутизации (Routing Table)
 #[derive(Debug, Clone)]
 pub struct RoutingTable {
-    pub entries: HashMap<TreeId, RouteUpdate>,
+    pub entries: HashMap<TreeId, (RouteUpdate, u64)>,
 }
 
 impl Default for RoutingTable {
@@ -148,24 +148,25 @@ impl RoutingTable {
     /// Обновление таблицы при получении инфы от соседа
     pub fn update_from_neighbor(&mut self, local_id: TreeId, neighbor_info: TreeInfo, neighbor_routes: &[RouteUpdate]) {
         let neighbor_id = neighbor_info.id;
+        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
         
         // Добавляем самого соседа (расстояние 1, путь только он сам)
         // Защита от перезаписи хорошей инфы (например, от Wi-Fi) пустой инфой (от BLE-заглушки)
-        if let Some(existing) = self.entries.get(&neighbor_id) {
+        if let Some((existing, _)) = self.entries.get(&neighbor_id) {
             let better_info = if neighbor_info.public_key.is_empty() || neighbor_info.freedom < existing.target_info.freedom {
                 existing.target_info.clone()
             } else {
                 neighbor_info.clone()
             };
-            self.entries.insert(neighbor_id, RouteUpdate {
+            self.entries.insert(neighbor_id, (RouteUpdate {
                 target_info: better_info,
                 path: vec![neighbor_id],
-            });
+            }, now));
         } else {
-            self.entries.insert(neighbor_id, RouteUpdate {
+            self.entries.insert(neighbor_id, (RouteUpdate {
                 target_info: neighbor_info.clone(),
                 path: vec![neighbor_id],
-            });
+            }, now));
         }
 
         // Анализируем, кого знает сосед
@@ -178,7 +179,7 @@ impl RoutingTable {
             let mut new_path = vec![neighbor_id];
             new_path.extend_from_slice(&route.path);
             
-            if let Some(current_route) = self.entries.get(&target_id) {
+            if let Some((current_route, _)) = self.entries.get(&target_id) {
                 let new_freedom = route.target_info.freedom;
                 let current_freedom = current_route.target_info.freedom;
                 
@@ -187,31 +188,48 @@ impl RoutingTable {
 
                 if is_better {
                     // Нашли более свободный ИЛИ более короткий путь при равной свободе
-                    self.entries.insert(target_id, RouteUpdate {
+                    self.entries.insert(target_id, (RouteUpdate {
                         target_info: route.target_info.clone(),
                         path: new_path,
-                    });
+                    }, now));
+                } else {
+                    // Просто обновляем timestamp если путь тот же
+                    if current_route.path == new_path {
+                        if let Some(entry) = self.entries.get_mut(&target_id) {
+                            entry.1 = now;
+                        }
+                    }
                 }
             } else {
                 // Мы вообще не знали об этом узле
-                self.entries.insert(target_id, RouteUpdate {
+                self.entries.insert(target_id, (RouteUpdate {
                     target_info: route.target_info.clone(),
                     path: new_path,
-                });
+                }, now));
             }
         }
     }
     
+    /// Очищает устаревшие маршруты (например, если узла не было видно 5 минут)
+    pub fn cleanup_stale_routes(&mut self, timeout_secs: u64) -> usize {
+        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
+        let initial_len = self.entries.len();
+        self.entries.retain(|_, (_, timestamp)| {
+            now.saturating_sub(*timestamp) < timeout_secs
+        });
+        initial_len - self.entries.len()
+    }
+    
     pub fn get_next_hop(&self, target_id: &TreeId) -> Option<TreeId> {
-        self.entries.get(target_id).and_then(|r| r.path.first().copied())
+        self.entries.get(target_id).and_then(|(r, _)| r.path.first().copied())
     }
     
     pub fn get_path(&self, target_id: &TreeId) -> Option<Vec<TreeId>> {
-        self.entries.get(target_id).map(|r| r.path.clone())
+        self.entries.get(target_id).map(|(r, _)| r.path.clone())
     }
     
     pub fn get_info(&self, target_id: &TreeId) -> Option<TreeInfo> {
-        self.entries.get(target_id).map(|r| r.target_info.clone())
+        self.entries.get(target_id).map(|(r, _)| r.target_info.clone())
     }
 }
 
@@ -275,12 +293,25 @@ impl Mycelium {
     
     /// Получить локальные маршруты для отправки соседям
     pub fn get_local_routes(&self) -> Vec<RouteUpdate> {
-        self.routing_table.entries.values().cloned().collect()
+        self.routing_table.entries.values().map(|(r, _)| r.clone()).collect()
     }
 
     /// Сбросить Кору: сгенерировать новый эфемерный ID для анонимности
     pub async fn rotate_bark(&mut self) {
         let new_id = Uuid::new_v4();
+        
+        if let Some(old_dtn) = self.dtn.take() {
+            let old_path = old_dtn.path.clone();
+            let parent_dir = old_path.parent().map(|p| p.to_path_buf()).unwrap_or_else(|| std::path::PathBuf::from(".taiga_data"));
+            
+            // Drop DtnBuffer which closes the database
+            drop(old_dtn);
+            let _ = std::fs::remove_file(&old_path);
+            
+            let new_path = parent_dir.join(format!("taiga_dtn_{}.redb", new_id));
+            let _ = self.init_dtn(new_path);
+        }
+
         self.local_info.id = new_id;
         
         // Ротируем ключи шифрования
