@@ -25,8 +25,10 @@ lazy_static! {
 pub fn send_ble_message_to_kotlin(mac: &str, payload: &[u8]) {
     if let Some(vm) = ANDROID_JVM.lock().unwrap().as_ref() {
         if let Ok(mut env) = vm.attach_current_thread() {
-            let class_lock = MYCELIUM_CORE_CLASS.lock().unwrap();
-            if let Some(global_ref) = class_lock.as_ref() {
+            let global_ref_opt = {
+                MYCELIUM_CORE_CLASS.lock().unwrap().as_ref().cloned()
+            };
+            if let Some(global_ref) = global_ref_opt {
                 if let Ok(mac_jstring) = env.new_string(mac) {
                     if let Ok(payload_jbytearray) = env.byte_array_from_slice(payload) {
                         let class = <&jni::objects::JClass>::from(global_ref.as_obj());
@@ -50,8 +52,10 @@ pub fn get_android_node_id() -> Option<Uuid> {
 pub fn ping_bypassing_vpn(url: &str) -> bool {
     if let Some(vm) = ANDROID_JVM.lock().unwrap().as_ref() {
         if let Ok(mut env) = vm.attach_current_thread() {
-            let class_lock = MYCELIUM_CORE_CLASS.lock().unwrap();
-            if let Some(global_ref) = class_lock.as_ref() {
+            let global_ref_opt = {
+                MYCELIUM_CORE_CLASS.lock().unwrap().as_ref().cloned()
+            };
+            if let Some(global_ref) = global_ref_opt {
                 if let Ok(url_jstring) = env.new_string(url) {
                     let class = <&jni::objects::JClass>::from(global_ref.as_obj());
                     if let Ok(result) = env.call_static_method(
@@ -72,8 +76,10 @@ pub fn ping_bypassing_vpn(url: &str) -> bool {
 pub fn has_physical_internet() -> bool {
     if let Some(vm) = ANDROID_JVM.lock().unwrap().as_ref() {
         if let Ok(mut env) = vm.attach_current_thread() {
-            let class_lock = MYCELIUM_CORE_CLASS.lock().unwrap();
-            if let Some(global_ref) = class_lock.as_ref() {
+            let global_ref_opt = {
+                MYCELIUM_CORE_CLASS.lock().unwrap().as_ref().cloned()
+            };
+            if let Some(global_ref) = global_ref_opt {
                 let class = <&jni::objects::JClass>::from(global_ref.as_obj());
                 if let Ok(result) = env.call_static_method(
                     class,

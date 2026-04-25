@@ -76,16 +76,6 @@ pub enum Onion {
     Layer { next_hop: TreeId, encrypted_data: Vec<u8> },
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub enum MeshPayload {
-    /// Запрос на открытие TCP-соединения на Exit Node
-    Connect { stream_id: Uuid, host: String, port: u16 },
-    /// Данные для существующего потока
-    Data { stream_id: Uuid, data: Vec<u8> },
-    /// Закрытие потока
-    Close { stream_id: Uuid },
-}
-
 /// Фрагментированный пакет данных (Хвоинка).
 /// Получается после работы мультиплексора (taiga-resin), 
 /// который разрезает большую Шишку (Cone).
