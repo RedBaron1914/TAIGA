@@ -7,6 +7,8 @@ Cargo.lock
 /crates/taiga-egui/android/build
 /crates/taiga-egui/android/app/build
 /crates/taiga-egui/android/app/src/main/jniLibs
+crates/taiga-egui/android/gradle-*
+crates/taiga-egui/android/gradle.zip
 *.keystore
 local.properties
 
