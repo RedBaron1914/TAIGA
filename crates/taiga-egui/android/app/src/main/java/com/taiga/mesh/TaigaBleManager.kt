@@ -22,6 +22,9 @@ class TaigaBleManager(private val context: Context, private val localNodeId: Byt
     private val bluetoothAdapter: BluetoothAdapter? = bluetoothManager.adapter
     private var gattServer: BluetoothGattServer? = null
     
+    private var scanCallback: ScanCallback? = null
+    private var advertiseCallback: AdvertiseCallback? = null
+
     private val bleScanner: BluetoothLeScanner?
         get() = bluetoothAdapter?.bluetoothLeScanner
         
@@ -37,6 +40,18 @@ class TaigaBleManager(private val context: Context, private val localNodeId: Byt
         startGattServer()
         startAdvertising()
         startScanning()
+    }
+
+    fun stop() {
+        try {
+            scanCallback?.let { bleScanner?.stopScan(it) }
+            advertiseCallback?.let { bleAdvertiser?.stopAdvertising(it) }
+            gattServer?.close()
+            gattServer = null
+            Log.i(TAG, "BLE Manager stopped cleanly.")
+        } catch (e: Exception) {
+            Log.e(TAG, "Error stopping BLE: ${e.message}")
+        }
     }
 
     private fun startGattServer() {
@@ -99,7 +114,7 @@ class TaigaBleManager(private val context: Context, private val localNodeId: Byt
             .addManufacturerData(0x1337, localNodeId) 
             .build()
 
-        bleAdvertiser?.startAdvertising(settings, data, object : AdvertiseCallback() {
+        advertiseCallback = object : AdvertiseCallback() {
             override fun onStartSuccess(settingsInEffect: AdvertiseSettings) {
                 Log.i(TAG, "Advertising started successfully")
             }
@@ -107,7 +122,9 @@ class TaigaBleManager(private val context: Context, private val localNodeId: Byt
             override fun onStartFailure(errorCode: Int) {
                 Log.e(TAG, "Advertising failed with error: $errorCode")
             }
-        })
+        }
+
+        bleAdvertiser?.startAdvertising(settings, data, advertiseCallback)
     }
 
     private fun startScanning() {
@@ -119,7 +136,7 @@ class TaigaBleManager(private val context: Context, private val localNodeId: Byt
             .setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY)
             .build()
 
-        bleScanner?.startScan(listOf(filter), settings, object : ScanCallback() {
+        scanCallback = object : ScanCallback() {
             override fun onScanResult(callbackType: Int, result: ScanResult) {
                 val manufacturerData = result.scanRecord?.getManufacturerSpecificData(0x1337)
                 if (manufacturerData != null) {
@@ -131,7 +148,9 @@ class TaigaBleManager(private val context: Context, private val localNodeId: Byt
             override fun onScanFailed(errorCode: Int) {
                 Log.e(TAG, "Scan failed with error: $errorCode")
             }
-        })
+        }
+
+        bleScanner?.startScan(listOf(filter), settings, scanCallback)
         
         Log.i(TAG, "BLE Scanner started")
     }

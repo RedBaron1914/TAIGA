@@ -9,6 +9,10 @@ import android.util.Log
 import android.content.Context
 import android.net.wifi.p2p.WifiP2pManager
 import android.content.IntentFilter
+import android.content.Intent
+import android.bluetooth.BluetoothAdapter
+import android.bluetooth.BluetoothManager
+import android.content.BroadcastReceiver
 
 class MainActivity : GameActivity() {
     companion object {
@@ -20,6 +24,26 @@ class MainActivity : GameActivity() {
 
     private var bleManager: TaigaBleManager? = null
     private var wifiManager: TaigaWifiManager? = null
+
+    private val bluetoothStateReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            val action = intent.action
+            if (action == BluetoothAdapter.ACTION_STATE_CHANGED) {
+                val state = intent.getIntExtra(BluetoothAdapter.EXTRA_STATE, BluetoothAdapter.ERROR)
+                when (state) {
+                    BluetoothAdapter.STATE_OFF -> {
+                        Log.i("TAIGA", "Bluetooth выключен пользователем. Останавливаем BLE.")
+                        bleManager?.stop()
+                        bleManager = null
+                    }
+                    BluetoothAdapter.STATE_ON -> {
+                        Log.i("TAIGA", "Bluetooth включен. Запускаем BLE.")
+                        startBleTransport()
+                    }
+                }
+            }
+        }
+    }
 
     private fun getOrCreateNodeId(): ByteArray {
         val prefs = getSharedPreferences("taiga_prefs", Context.MODE_PRIVATE)
@@ -47,8 +71,21 @@ class MainActivity : GameActivity() {
         
         Log.i("TAIGA", "Starting GameActivity for egui...")
 
+        // Регистрируем слушатель для отслеживания состояния Bluetooth
+        registerReceiver(bluetoothStateReceiver, IntentFilter(BluetoothAdapter.ACTION_STATE_CHANGED))
+
         // Начиная с Android 6+ (и особенно 12+) разрешения нужно запрашивать "вживую"
         requestTaigaPermissions()
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        try {
+            unregisterReceiver(bluetoothStateReceiver)
+        } catch (e: Exception) {
+            Log.e("TAIGA", "Error unregistering receiver", e)
+        }
+        bleManager?.stop()
     }
 
     private fun requestTaigaPermissions() {
@@ -78,7 +115,7 @@ class MainActivity : GameActivity() {
             requestPermissions(missingPermissions, 1337)
         } else {
             Log.i("TAIGA", "Все разрешения уже выданы.")
-            startTransports()
+            checkBluetoothAndStart()
         }
     }
 
@@ -87,33 +124,67 @@ class MainActivity : GameActivity() {
         if (requestCode == 1337) {
             val allGranted = grantResults.all { it == PackageManager.PERMISSION_GRANTED }
             if (allGranted) {
-                Log.i("TAIGA", "Пользователь дал добро! Запускаем BLE и Wi-Fi Direct.")
-                startTransports()
+                Log.i("TAIGA", "Пользователь дал добро! Проверяем Bluetooth.")
+                checkBluetoothAndStart()
             } else {
                 Log.e("TAIGA", "Пользователь отказал в разрешениях. Сеть работать не будет!")
-                startTransports() 
+                // При отказе в разрешениях мы больше не вызываем startTransports()
             }
         }
     }
 
-    private fun startTransports() {
-        val nodeId = getOrCreateNodeId()
+    private fun checkBluetoothAndStart() {
+        val bluetoothManager = getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
+        val bluetoothAdapter = bluetoothManager.adapter
         
-        // Запуск BLE-менеджера
-        bleManager = TaigaBleManager(this, nodeId)
-        bleManager?.start()
-        
-        // Запуск Wi-Fi Direct менеджера
-        val p2pManager = getSystemService(Context.WIFI_P2P_SERVICE) as WifiP2pManager?
-        if (p2pManager != null) {
-            val channel = p2pManager.initialize(this, mainLooper, null)
-            wifiManager = TaigaWifiManager(this, p2pManager, channel)
-            registerReceiver(wifiManager, wifiManager?.getIntentFilter())
-            
-            // Запускаем поиск пиров по Wi-Fi Direct
-            wifiManager?.discoverPeers()
+        if (bluetoothAdapter == null) {
+            Log.e("TAIGA", "Bluetooth is not supported on this device.")
+            startWifiTransport()
+        } else if (!bluetoothAdapter.isEnabled) {
+            Log.i("TAIGA", "Bluetooth выключен. Запрашиваем включение у пользователя...")
+            val enableBtIntent = Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE)
+            startActivityForResult(enableBtIntent, 1338)
+            // Wi-Fi можем запустить параллельно, не дожидаясь ответа по Bluetooth
+            startWifiTransport()
         } else {
-            Log.e("TAIGA", "Wi-Fi Direct is not supported on this device.")
+            startBleTransport()
+            startWifiTransport()
+        }
+    }
+
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == 1338) {
+            if (resultCode == android.app.Activity.RESULT_OK) {
+                Log.i("TAIGA", "Пользователь включил Bluetooth.")
+                startBleTransport()
+            } else {
+                Log.e("TAIGA", "Пользователь отказался включать Bluetooth.")
+            }
+        }
+    }
+
+    private fun startBleTransport() {
+        if (bleManager == null) {
+            val nodeId = getOrCreateNodeId()
+            bleManager = TaigaBleManager(this, nodeId)
+            bleManager?.start()
+        }
+    }
+
+    private fun startWifiTransport() {
+        if (wifiManager == null) {
+            val p2pManager = getSystemService(Context.WIFI_P2P_SERVICE) as WifiP2pManager?
+            if (p2pManager != null) {
+                val channel = p2pManager.initialize(this, mainLooper, null)
+                wifiManager = TaigaWifiManager(this, p2pManager, channel)
+                registerReceiver(wifiManager, wifiManager?.getIntentFilter())
+                
+                // Запускаем поиск пиров по Wi-Fi Direct
+                wifiManager?.discoverPeers()
+            } else {
+                Log.e("TAIGA", "Wi-Fi Direct is not supported on this device.")
+            }
         }
     }
 
