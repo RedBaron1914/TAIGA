@@ -299,6 +299,7 @@ impl TaigaApp {
                 tokio::spawn(async move {
                     let _client = reqwest::Client::builder()
                         .timeout(std::time::Duration::from_secs(3))
+                        .danger_accept_invalid_certs(true)
                         .build()
                         .unwrap();
 
