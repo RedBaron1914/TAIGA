@@ -53,18 +53,22 @@ impl UdpRoot {
                                 let current_info = local_info_clone.lock().await.clone();
                                 if info.id != current_info.id {
                                     log::info!("[UdpRoot] Получен запрос на поиск от Дерева: {} (IP: {})", info.id, addr);
+                                    #[cfg(target_os = "android")]
+                                    crate::jni_bridge::send_ui_log("WIFI", &format!("UDP: Получен запрос на поиск от Дерева: {} (IP: {})", info.id, addr));
                                     peers_clone.lock().await.insert(info.id, (addr, info, routes));
-                                    
-                                    let resp = UdpPacket::DiscoverResponse(current_info, vec![]); // We'll rely on active discover() to send our routes
-                                    if let Ok(bytes) = serde_json::to_vec(&resp) {
-                                        let _ = sock_clone.send_to(&bytes, addr).await;
-                                    }
+
+                                    // Отвечаем кто мы
+                                    let req = UdpPacket::DiscoverResponse(current_info, vec![]);
+                                    let req_bytes = serde_json::to_vec(&req).unwrap();
+                                    let _ = sock_clone.send_to(&req_bytes, addr).await;
                                 }
-                            }
-                            UdpPacket::DiscoverResponse(info, routes) => {
+                                }
+                                UdpPacket::DiscoverResponse(info, routes) => {
                                 log::info!("[UdpRoot] Найден сосед! Дерево: {} (IP: {})", info.id, addr);
+                                #[cfg(target_os = "android")]
+                                crate::jni_bridge::send_ui_log("WIFI", &format!("UDP: Найден сосед! Дерево: {} (IP: {})", info.id, addr));
                                 peers_clone.lock().await.insert(info.id, (addr, info, routes));
-                            }
+                                }
                             UdpPacket::NeedlePayload(needle) => {
                                 log::info!("[UdpRoot] Получена Хвоинка от {}", addr);
                                 let mut sender_id = uuid::Uuid::nil();

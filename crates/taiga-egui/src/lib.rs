@@ -145,6 +145,18 @@ impl TaigaApp {
                                         ctx_for_jni.request_repaint();
                                         ble_root.inject_needle(mac, payload).await;
                                     },
+                                    taiga_mycelium::jni_bridge::JniEvent::WifiDirectDisconnected => {
+                                        let _ = tx_for_jni.send(LogEvent {
+                                            level: "WIFI".to_string(),
+                                            message: "Wi-Fi Direct канал разорван.".to_string(),
+                                        });
+                                        ctx_for_jni.request_repaint();
+                                        // TODO: Remove WifiRoot from mycelium (not strictly needed since timeout removes stale routes)
+                                    },
+                                    taiga_mycelium::jni_bridge::JniEvent::UiLog(level, message) => {
+                                        let _ = tx_for_jni.send(LogEvent { level, message });
+                                        ctx_for_jni.request_repaint();
+                                    },
                                     _ => {}
                                 }
                             } else {

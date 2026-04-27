@@ -121,10 +121,12 @@ class TaigaBleManager(private val context: Context, private val localNodeId: Byt
         advertiseCallback = object : AdvertiseCallback() {
             override fun onStartSuccess(settingsInEffect: AdvertiseSettings) {
                 Log.i(TAG, "Advertising started successfully")
+                MyceliumCore.sendLogToRust("NETWORK", "BLE GATT Сервер и Реклама запущены.")
             }
 
             override fun onStartFailure(errorCode: Int) {
                 Log.e(TAG, "Advertising failed with error: $errorCode")
+                MyceliumCore.sendLogToRust("NETWORK", "Ошибка запуска BLE рекламы: $errorCode. Возможно устройство не поддерживает BLE Peripheral.")
             }
         }
 
@@ -151,12 +153,14 @@ class TaigaBleManager(private val context: Context, private val localNodeId: Byt
 
             override fun onScanFailed(errorCode: Int) {
                 Log.e(TAG, "Scan failed with error: $errorCode")
+                MyceliumCore.sendLogToRust("NETWORK", "Ошибка BLE сканирования: $errorCode")
             }
         }
 
         bleScanner?.startScan(listOf(filter), settings, scanCallback)
         
         Log.i(TAG, "BLE Scanner started")
+        MyceliumCore.sendLogToRust("NETWORK", "BLE Сканер эфира запущен.")
     }
 
     fun sendMessage(macAddress: String, payload: ByteArray) {

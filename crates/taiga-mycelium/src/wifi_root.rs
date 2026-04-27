@@ -60,14 +60,17 @@ impl WifiRoot {
             // Поднимаем сервер
             let listener = TcpListener::bind("0.0.0.0:40001").await.map_err(|e| e.to_string())?;
             log::info!("[WifiRoot] Мы Group Owner. Сервер запущен на порту 40001");
-            
+            #[cfg(target_os = "android")]
+            crate::jni_bridge::send_ui_log("WIFI", "Мы Group Owner. Ожидаем P2P-клиентов на порту 40001.");
+
             let local_info_clone = local_info.clone();
             let peers_clone = peers.clone();
             let needle_tx_clone = needle_tx.clone();
-            
             tokio::spawn(async move {
                 while let Ok((stream, addr)) = listener.accept().await {
                     log::info!("[WifiRoot] Новое входящее TCP-подключение от {}", addr);
+                    #[cfg(target_os = "android")]
+                    crate::jni_bridge::send_ui_log("WIFI", &format!("Новое входящее P2P-подключение от {}", addr));
                     Self::handle_connection(stream, local_info_clone.clone(), peers_clone.clone(), needle_tx_clone.clone());
                 }
             });
@@ -75,10 +78,14 @@ impl WifiRoot {
             // Подключаемся к GO
             let go_addr = format!("{}:40001", group_owner_ip);
             log::info!("[WifiRoot] Подключаемся к Group Owner: {}", go_addr);
-            
+            #[cfg(target_os = "android")]
+            crate::jni_bridge::send_ui_log("WIFI", &format!("Подключаемся к Group Owner: {}", go_addr));
+
             // В реальной жизни нужно делать ретраи, так как сервер мог еще не подняться
             let stream = TcpStream::connect(&go_addr).await.map_err(|e| e.to_string())?;
             log::info!("[WifiRoot] Успешно подключено к GO!");
+            #[cfg(target_os = "android")]
+            crate::jni_bridge::send_ui_log("WIFI", "Успешно подключено к Group Owner!");
             Self::handle_connection(stream, local_info.clone(), peers.clone(), needle_tx.clone());
         }
 

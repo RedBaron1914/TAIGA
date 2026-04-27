@@ -81,6 +81,9 @@ object MyceliumCore {
     @JvmStatic
     external fun onWifiDirectDisconnected()
 
+    @JvmStatic
+    external fun sendLogToRust(level: String, message: String)
+
     init {
         try {
             System.loadLibrary("taiga_egui")

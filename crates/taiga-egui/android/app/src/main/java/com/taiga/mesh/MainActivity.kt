@@ -112,9 +112,11 @@ class MainActivity : GameActivity() {
 
         if (missingPermissions.isNotEmpty()) {
             Log.i("TAIGA", "Запрашиваем разрешения у пользователя...")
+            MyceliumCore.sendLogToRust("SYSTEM", "Запрашиваем разрешения у пользователя: Location, BLE, Wi-Fi...")
             requestPermissions(missingPermissions, 1337)
         } else {
             Log.i("TAIGA", "Все разрешения уже выданы.")
+            MyceliumCore.sendLogToRust("SYSTEM", "Все разрешения выданы, запускаем транспорты...")
             checkBluetoothAndStart()
         }
     }
@@ -125,9 +127,11 @@ class MainActivity : GameActivity() {
             val allGranted = grantResults.all { it == PackageManager.PERMISSION_GRANTED }
             if (allGranted) {
                 Log.i("TAIGA", "Пользователь дал добро! Проверяем Bluetooth.")
+                MyceliumCore.sendLogToRust("SYSTEM", "Пользователь дал разрешения! Запускаем сеть.")
                 checkBluetoothAndStart()
             } else {
                 Log.e("TAIGA", "Пользователь отказал в разрешениях. Сеть работать не будет!")
+                MyceliumCore.sendLogToRust("SYSTEM", "ОТКАЗ В ПРАВАХ: Bluetooth и Wi-Fi P2P работать не будут!")
                 // При отказе в разрешениях мы больше не вызываем startTransports()
             }
         }
@@ -139,9 +143,11 @@ class MainActivity : GameActivity() {
         
         if (bluetoothAdapter == null) {
             Log.e("TAIGA", "Bluetooth is not supported on this device.")
+            MyceliumCore.sendLogToRust("NETWORK", "Bluetooth аппаратно не поддерживается на этом устройстве.")
             startWifiTransport()
         } else if (!bluetoothAdapter.isEnabled) {
             Log.i("TAIGA", "Bluetooth выключен. Запрашиваем включение у пользователя...")
+            MyceliumCore.sendLogToRust("NETWORK", "Bluetooth выключен. Ждем включения от пользователя...")
             val enableBtIntent = Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE)
             startActivityForResult(enableBtIntent, 1338)
             // Wi-Fi можем запустить параллельно, не дожидаясь ответа по Bluetooth
@@ -157,9 +163,11 @@ class MainActivity : GameActivity() {
         if (requestCode == 1338) {
             if (resultCode == android.app.Activity.RESULT_OK) {
                 Log.i("TAIGA", "Пользователь включил Bluetooth.")
+                MyceliumCore.sendLogToRust("NETWORK", "Bluetooth успешно включен пользователем!")
                 startBleTransport()
             } else {
                 Log.e("TAIGA", "Пользователь отказался включать Bluetooth.")
+                MyceliumCore.sendLogToRust("NETWORK", "Пользователь отклонил запрос на включение Bluetooth. Работаем только по Wi-Fi.")
             }
         }
     }

@@ -48,10 +48,12 @@ class TaigaWifiManager(
         manager.discoverPeers(channel, object : WifiP2pManager.ActionListener {
             override fun onSuccess() {
                 Log.i(TAG, "Wi-Fi Direct discovery started")
+                MyceliumCore.sendLogToRust("WIFI", "Поиск соседей по Wi-Fi Direct запущен.")
             }
 
             override fun onFailure(reasonCode: Int) {
                 Log.e(TAG, "Wi-Fi Direct discovery failed: $reasonCode")
+                MyceliumCore.sendLogToRust("WIFI", "Ошибка запуска поиска Wi-Fi Direct: $reasonCode")
             }
         })
     }
@@ -76,10 +78,12 @@ class TaigaWifiManager(
         manager.connect(channel, config, object : WifiP2pManager.ActionListener {
             override fun onSuccess() {
                 Log.i(TAG, "Connecting to Wi-Fi Direct peer: $deviceAddress")
+                MyceliumCore.sendLogToRust("WIFI", "Попытка подключения к P2P устройству: $deviceAddress")
             }
 
             override fun onFailure(reason: Int) {
                 Log.e(TAG, "Failed to connect to peer: $reason")
+                MyceliumCore.sendLogToRust("WIFI", "Не удалось подключиться к P2P устройству. Код: $reason")
             }
         })
     }

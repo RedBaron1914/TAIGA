@@ -13,6 +13,7 @@ pub enum JniEvent {
     BleMessageReceived(String, Vec<u8>),
     WifiDirectConnected { ip: String, is_group_owner: bool },
     WifiDirectDisconnected,
+    UiLog(String, String),
 }
 
 lazy_static! {
@@ -20,6 +21,10 @@ lazy_static! {
     pub static ref ANDROID_NODE_ID: Arc<Mutex<Option<Uuid>>> = Arc::new(Mutex::new(None));
     pub static ref ANDROID_JVM: Arc<Mutex<Option<jni::JavaVM>>> = Arc::new(Mutex::new(None));
     pub static ref MYCELIUM_CORE_CLASS: Arc<Mutex<Option<jni::objects::GlobalRef>>> = Arc::new(Mutex::new(None));
+}
+
+pub fn send_ui_log(level: &str, msg: &str) {
+    send_event(JniEvent::UiLog(level.to_string(), msg.to_string()));
 }
 
 pub fn send_ble_message_to_kotlin(mac: &str, payload: &[u8]) {
@@ -192,4 +197,18 @@ pub extern "system" fn Java_com_taiga_mesh_MyceliumCore_onWifiDirectDisconnected
 ) {
     log::info!("[JNI] Wi-Fi Direct Disconnected!");
     send_event(JniEvent::WifiDirectDisconnected);
+}
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_com_taiga_mesh_MyceliumCore_sendLogToRust<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    level: JString<'local>,
+    message: JString<'local>,
+) {
+    if let Ok(lvl) = env.get_string(&level) {
+        if let Ok(msg) = env.get_string(&message) {
+            send_ui_log(&String::from(lvl), &String::from(msg));
+        }
+    }
 }
