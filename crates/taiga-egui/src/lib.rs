@@ -129,10 +129,20 @@ impl TaigaApp {
                                     },
                                     taiga_mycelium::jni_bridge::JniEvent::BleDeviceDiscovered(mac, id_bytes) => {
                                         if let Ok(id) = Uuid::from_slice(&id_bytes) {
+                                            let _ = tx_for_jni.send(LogEvent {
+                                                level: "NETWORK".to_string(),
+                                                message: format!("Найдено Дерево по BLE! MAC: {}, ID: {}", mac, id),
+                                            });
+                                            ctx_for_jni.request_repaint();
                                             ble_root.add_discovered_neighbor(mac, id).await;
                                         }
                                     },
                                     taiga_mycelium::jni_bridge::JniEvent::BleMessageReceived(mac, payload) => {
+                                        let _ = tx_for_jni.send(LogEvent {
+                                            level: "WIFI".to_string(), // Temporarily reuse WIFI or create a new BLE color
+                                            message: format!("Получена Хвоинка по BLE от {} ({} байт)", mac, payload.len()),
+                                        });
+                                        ctx_for_jni.request_repaint();
                                         ble_root.inject_needle(mac, payload).await;
                                     },
                                     _ => {}

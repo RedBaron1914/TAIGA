@@ -106,11 +106,15 @@ class TaigaBleManager(private val context: Context, private val localNodeId: Byt
             .setTxPowerLevel(AdvertiseSettings.ADVERTISE_TX_POWER_HIGH)
             .build()
 
+        // Основной пакет: только Service UUID (чтобы влезть в лимит 31 байт)
         val data = AdvertiseData.Builder()
             .setIncludeDeviceName(false)
             .addServiceUuid(ParcelUuid(SERVICE_UUID))
-            // Прячем наш NodeId (или эфемерный ключ) в Manufacturer Data.
-            // В релизе это будет зашифрованный токен, но пока пишем ID как есть.
+            .build()
+
+        // Scan Response: Manufacturer Data с нашим NodeID
+        val scanResponse = AdvertiseData.Builder()
+            .setIncludeDeviceName(false)
             .addManufacturerData(0x1337, localNodeId) 
             .build()
 
@@ -124,7 +128,7 @@ class TaigaBleManager(private val context: Context, private val localNodeId: Byt
             }
         }
 
-        bleAdvertiser?.startAdvertising(settings, data, advertiseCallback)
+        bleAdvertiser?.startAdvertising(settings, data, scanResponse, advertiseCallback)
     }
 
     private fun startScanning() {
