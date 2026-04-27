@@ -546,9 +546,9 @@ impl eframe::App for TaigaApp {
                                 "WIFI" => egui::Color32::CYAN,
                                 _ => egui::Color32::GRAY,
                             };
-                            ui.horizontal(|ui| {
+                            ui.horizontal_wrapped(|ui| {
                                 ui.label(egui::RichText::new(format!("[{}]", log.level)).color(color).strong());
-                                ui.label(&log.message);
+                                ui.add(egui::Label::new(&log.message).wrap());
                             });
                         }
                     });
