@@ -17,7 +17,16 @@ android {
         setProperty("archivesBaseName", "TAIGA-v${versionName}")
 
         ndk {
-            abiFilters.add("arm64-v8a")
+            abiFilters.addAll(arrayOf("arm64-v8a", "armeabi-v7a", "x86", "x86_64"))
+        }
+    }
+
+    splits {
+        abi {
+            isEnable = true
+            reset()
+            include("arm64-v8a", "armeabi-v7a", "x86", "x86_64")
+            isUniversalApk = true
         }
     }
 
@@ -53,9 +62,9 @@ android {
 }
 
 // Кастомный таск для компиляции Rust через cargo ndk
-tasks.register<Exec>("cargoBuildArm64") {
+tasks.register<Exec>("cargoBuildAll") {
     val cargoProjectDir = file("../../") // Директория taiga-egui
-    val jniLibsDir = file("src/main/jniLibs/arm64-v8a")
+    val jniLibsDir = file("src/main/jniLibs")
     
     // Создаем директорию для .so файла
     doFirst {
@@ -68,16 +77,16 @@ tasks.register<Exec>("cargoBuildArm64") {
     val isRelease = gradle.startParameter.taskNames.any { it.contains("Release", ignoreCase = true) }
     
     if (isRelease) {
-        commandLine("cargo", "ndk", "-t", "arm64-v8a", "-o", "android/app/src/main/jniLibs", "build", "--release")
+        commandLine("cargo", "ndk", "-t", "armeabi-v7a", "-t", "arm64-v8a", "-t", "x86", "-t", "x86_64", "-o", "android/app/src/main/jniLibs", "build", "--release")
     } else {
-        commandLine("cargo", "ndk", "-t", "arm64-v8a", "-o", "android/app/src/main/jniLibs", "build")
+        commandLine("cargo", "ndk", "-t", "armeabi-v7a", "-t", "arm64-v8a", "-t", "x86", "-t", "x86_64", "-o", "android/app/src/main/jniLibs", "build")
     }
 }
 
 // Привязываем наш таск к процессу сборки до того, как Gradle начнет паковать APK
 tasks.whenTaskAdded {
     if ((name == "javaPreCompileDebug" || name == "javaPreCompileRelease")) {
-        dependsOn("cargoBuildArm64")
+        dependsOn("cargoBuildAll")
     }
 }
 
