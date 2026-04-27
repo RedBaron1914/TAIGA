@@ -56,6 +56,18 @@ class TaigaWifiManager(
         })
     }
 
+    fun stopDiscovery() {
+        manager.stopPeerDiscovery(channel, object : WifiP2pManager.ActionListener {
+            override fun onSuccess() {
+                Log.i(TAG, "Wi-Fi Direct discovery stopped")
+            }
+
+            override fun onFailure(reasonCode: Int) {
+                Log.e(TAG, "Wi-Fi Direct stop discovery failed: $reasonCode")
+            }
+        })
+    }
+
     fun connectTo(deviceAddress: String) {
         val config = WifiP2pConfig().apply {
             this.deviceAddress = deviceAddress
@@ -77,9 +89,11 @@ class TaigaWifiManager(
             WifiP2pManager.WIFI_P2P_STATE_CHANGED_ACTION -> {
                 val state = intent.getIntExtra(WifiP2pManager.EXTRA_WIFI_STATE, -1)
                 if (state == WifiP2pManager.WIFI_P2P_STATE_ENABLED) {
-                    Log.i(TAG, "Wi-Fi Direct is enabled")
+                    Log.i(TAG, "Wi-Fi Direct is enabled. Starting discovery...")
+                    discoverPeers()
                 } else {
-                    Log.w(TAG, "Wi-Fi Direct is not enabled")
+                    Log.w(TAG, "Wi-Fi Direct is disabled. Stopping discovery...")
+                    stopDiscovery()
                 }
             }
             WifiP2pManager.WIFI_P2P_PEERS_CHANGED_ACTION -> {
