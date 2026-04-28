@@ -1,6 +1,6 @@
 {
-  "crates/taiga-mycelium": "1.0.1",
+  "crates/taiga-mycelium": "1.0.2",
   "crates/taiga-resin": "1.0.1",
-  "crates/taiga-egui": "1.0.1",
+  "crates/taiga-egui": "1.0.2",
   "crates/taiga-node": "1.0.1"
 }
