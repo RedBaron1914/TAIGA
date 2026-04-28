@@ -32,17 +32,24 @@ android {
 
     signingConfigs {
         create("release") {
-            storeFile = file("release.keystore")
-            storePassword = "taiga123"
-            keyAlias = "taiga"
-            keyPassword = "taiga123"
+            val keystoreFile = file("release.keystore")
+            if (keystoreFile.exists()) {
+                storeFile = keystoreFile
+                storePassword = System.getenv("ORG_GRADLE_PROJECT_KEYSTORE_PASSWORD") ?: "taiga123"
+                keyAlias = System.getenv("ORG_GRADLE_PROJECT_KEY_ALIAS") ?: "taiga"
+                keyPassword = System.getenv("ORG_GRADLE_PROCESS_KEY_PASSWORD") ?: "taiga123"
+            }
         }
     }
 
     buildTypes {
         release {
             isMinifyEnabled = false
-            signingConfig = signingConfigs.getByName("release")
+            if (file("release.keystore").exists()) {
+                signingConfig = signingConfigs.getByName("release")
+            } else {
+                signingConfig = signingConfigs.getByName("debug")
+            }
         }
     }
     compileOptions {
