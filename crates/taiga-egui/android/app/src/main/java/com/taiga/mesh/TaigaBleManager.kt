@@ -9,6 +9,7 @@ import android.util.Log
 import java.util.UUID
 
 @SuppressLint("MissingPermission") // В реальном проекте права запрашиваются через Activity/egui
+@Suppress("DEPRECATION")
 class TaigaBleManager(private val context: Context, private val localNodeId: ByteArray) {
     companion object {
         const val TAG = "TaigaBLE"

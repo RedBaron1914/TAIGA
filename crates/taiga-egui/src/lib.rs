@@ -156,8 +156,7 @@ impl TaigaApp {
                                     taiga_mycelium::jni_bridge::JniEvent::UiLog(level, message) => {
                                         let _ = tx_for_jni.send(LogEvent { level, message });
                                         ctx_for_jni.request_repaint();
-                                    },
-                                    _ => {}
+                                    }
                                 }
                             } else {
                                 tokio::time::sleep(std::time::Duration::from_millis(50)).await;

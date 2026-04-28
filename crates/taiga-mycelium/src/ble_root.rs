@@ -91,12 +91,12 @@ impl Root for BleRoot {
         Ok(result)
     }
 
-    async fn send_needle(&self, #[allow(unused_variables)] to: TreeId, #[allow(unused_variables)] needle: Needle) -> Result<(), String> {
+    async fn send_needle(&self, _to: TreeId, _needle: Needle) -> Result<(), String> {
         #[cfg(target_os = "android")]
         {
             let mac_map = self.mac_map.lock().await;
-            if let Some(mac) = mac_map.get(&to) {
-                if let Ok(payload) = serde_json::to_vec(&needle) {
+            if let Some(mac) = mac_map.get(&_to) {
+                if let Ok(payload) = serde_json::to_vec(&_needle) {
                     log::info!("[BleRoot] Отправка Хвоинки на MAC: {}", mac);
                     // Вызов через мост JNI
                     crate::jni_bridge::send_ble_message_to_kotlin(mac, &payload);
@@ -108,6 +108,8 @@ impl Root for BleRoot {
 
         #[cfg(not(target_os = "android"))]
         {
+            let _ = _to;
+            let _ = _needle;
             Err("BLE отправка не поддерживается на этой платформе".to_string())
         }
     }

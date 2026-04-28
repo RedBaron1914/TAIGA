@@ -12,6 +12,7 @@ import android.net.wifi.p2p.WifiP2pManager
 import android.util.Log
 
 @SuppressLint("MissingPermission")
+@Suppress("DEPRECATION")
 class TaigaWifiManager(
     private val context: Context,
     private val manager: WifiP2pManager,

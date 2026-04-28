@@ -102,7 +102,7 @@ pub fn has_physical_internet() -> bool {
 
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_com_taiga_mesh_MyceliumCore_initNodeId<'local>(
-    mut env: JNIEnv<'local>,
+    env: JNIEnv<'local>,
     _class: JClass<'local>,
     node_id_bytes: JByteArray<'local>,
 ) {
