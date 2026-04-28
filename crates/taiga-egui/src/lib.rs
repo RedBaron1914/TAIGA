@@ -350,8 +350,7 @@ impl TaigaApp {
                             let mut m_guard = m_for_freedom.lock().await;
                             let is_virtual = !has_real_uplink || is_using_socks5;
                             if m_guard.local_info.freedom != new_freedom || m_guard.local_info.is_virtual_uplink != is_virtual {
-                                m_guard.local_info.freedom = new_freedom;
-                                m_guard.local_info.is_virtual_uplink = is_virtual;
+                                m_guard.set_freedom_level(new_freedom, is_virtual).await;
                                 changed = true;
                             }
                         }

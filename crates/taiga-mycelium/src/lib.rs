@@ -286,6 +286,18 @@ impl Mycelium {
         self.routing_table.entries.values().map(|(r, _)| r.clone()).collect()
     }
 
+    /// Обновить уровень свободы и передать его во все интерфейсы (Root)
+    pub async fn set_freedom_level(&mut self, freedom: FreedomLevel, is_virtual_uplink: bool) {
+        if self.local_info.freedom != freedom || self.local_info.is_virtual_uplink != is_virtual_uplink {
+            self.local_info.freedom = freedom;
+            self.local_info.is_virtual_uplink = is_virtual_uplink;
+            let updated_info = self.local_info.clone();
+            for root in &self.roots {
+                root.update_local_info(updated_info.clone()).await;
+            }
+        }
+    }
+
     /// Сбросить Кору: сгенерировать новый эфемерный ID для анонимности
     pub async fn rotate_bark(&mut self) {
         let new_id = Uuid::new_v4();
