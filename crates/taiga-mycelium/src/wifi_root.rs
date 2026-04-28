@@ -75,14 +75,28 @@ impl WifiRoot {
                 }
             });
         } else {
-            // Подключаемся к GO
+            // Подключаемся к GO с ретраями (сервер на GO мог еще не подняться)
             let go_addr = format!("{}:40001", group_owner_ip);
             log::info!("[WifiRoot] Подключаемся к Group Owner: {}", go_addr);
             #[cfg(target_os = "android")]
             crate::jni_bridge::send_ui_log("WIFI", &format!("Подключаемся к Group Owner: {}", go_addr));
 
-            // В реальной жизни нужно делать ретраи, так как сервер мог еще не подняться
-            let stream = TcpStream::connect(&go_addr).await.map_err(|e| e.to_string())?;
+            let mut stream = None;
+            for i in 1..=10 {
+                match TcpStream::connect(&go_addr).await {
+                    Ok(s) => {
+                        stream = Some(s);
+                        break;
+                    }
+                    Err(e) => {
+                        log::warn!("[WifiRoot] Ошибка подключения к GO (попытка {}): {}", i, e);
+                        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                    }
+                }
+            }
+
+            let stream = stream.ok_or_else(|| "Не удалось подключиться к GO после 10 попыток".to_string())?;
+            
             log::info!("[WifiRoot] Успешно подключено к GO!");
             #[cfg(target_os = "android")]
             crate::jni_bridge::send_ui_log("WIFI", "Успешно подключено к Group Owner!");

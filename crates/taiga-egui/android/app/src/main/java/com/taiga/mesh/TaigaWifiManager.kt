@@ -25,16 +25,28 @@ class TaigaWifiManager(
 
     private val peers = mutableListOf<WifiP2pDevice>()
 
+    private var isConnecting = false
+
     private val peerListListener = WifiP2pManager.PeerListListener { peerList ->
         val refreshedPeers = peerList.deviceList
         if (refreshedPeers != peers) {
             peers.clear()
             peers.addAll(refreshedPeers)
             Log.i(TAG, "Found ${peers.size} Wi-Fi Direct peers")
+            
+            // Автоматически пытаемся подключиться к первому доступному пиру
+            if (!isConnecting && peers.isNotEmpty()) {
+                val availablePeer = peers.firstOrNull { it.status == WifiP2pDevice.AVAILABLE }
+                if (availablePeer != null) {
+                    isConnecting = true
+                    connectTo(availablePeer.deviceAddress)
+                }
+            }
         }
     }
 
     private val connectionInfoListener = WifiP2pManager.ConnectionInfoListener { info ->
+        isConnecting = false
         val groupOwnerAddress = info.groupOwnerAddress?.hostAddress
         if (info.groupFormed && info.isGroupOwner) {
             Log.i(TAG, "I am the Group Owner. IP: $groupOwnerAddress")

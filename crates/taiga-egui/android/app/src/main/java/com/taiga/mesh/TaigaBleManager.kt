@@ -113,10 +113,19 @@ class TaigaBleManager(private val context: Context, private val localNodeId: Byt
             .addServiceUuid(ParcelUuid(SERVICE_UUID))
             .build()
 
-        // Scan Response: Manufacturer Data с нашим NodeID
+        // Scan Response: Manufacturer Data с нашим NodeID (16 байт) + Freedom Level (1 байт) + isVirtualUplink (1 байт)
+        val prefs = context.getSharedPreferences("taiga_prefs", Context.MODE_PRIVATE)
+        val freedomLevel = prefs.getInt("freedom_level", 0).toByte()
+        val isVirtualUplink = if (prefs.getBoolean("is_virtual_uplink", false)) 1.toByte() else 0.toByte()
+
+        val manufacturerData = ByteArray(18)
+        System.arraycopy(localNodeId, 0, manufacturerData, 0, 16)
+        manufacturerData[16] = freedomLevel
+        manufacturerData[17] = isVirtualUplink
+
         val scanResponse = AdvertiseData.Builder()
             .setIncludeDeviceName(false)
-            .addManufacturerData(0x1337, localNodeId) 
+            .addManufacturerData(0x1337, manufacturerData) 
             .build()
 
         advertiseCallback = object : AdvertiseCallback() {

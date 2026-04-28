@@ -128,13 +128,13 @@ impl TaigaApp {
                                         }
                                     },
                                     taiga_mycelium::jni_bridge::JniEvent::BleDeviceDiscovered(mac, id_bytes) => {
-                                        if let Ok(id) = Uuid::from_slice(&id_bytes) {
+                                        if let Ok(id) = Uuid::from_slice(&id_bytes[0..16]) {
                                             let _ = tx_for_jni.send(LogEvent {
                                                 level: "NETWORK".to_string(),
                                                 message: format!("Найдено Дерево по BLE! MAC: {}, ID: {}", mac, id),
                                             });
                                             ctx_for_jni.request_repaint();
-                                            ble_root.add_discovered_neighbor(mac, id).await;
+                                            ble_root.add_discovered_neighbor(mac, id_bytes).await;
                                         }
                                     },
                                     taiga_mycelium::jni_bridge::JniEvent::BleMessageReceived(mac, payload) => {

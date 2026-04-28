@@ -36,11 +36,41 @@ impl BleRoot {
         }
     }
 
-    /// Вызывается из JNI, когда сканер нашел новое устройство
-    pub async fn add_discovered_neighbor(&self, mac: String, id: TreeId) {
+    /// Вызывается из JNI, когда сканер нашел новое устройство. 
+    /// Ожидаем, что в Manufacturer Data зашиты: [ID (16 байт), Freedom (1 байт), Status (1 байт)]
+    pub async fn add_discovered_neighbor(&self, mac: String, manufacturer_data: Vec<u8>) {
+        if manufacturer_data.len() < 16 {
+            return; // Слишком короткий пакет
+        }
+
+        let mut id_bytes = [0u8; 16];
+        id_bytes.copy_from_slice(&manufacturer_data[0..16]);
+        let id = match Uuid::from_slice(&id_bytes) {
+            Ok(uuid) => uuid,
+            Err(_) => return,
+        };
+
         let mut map = self.mac_map.lock().await;
         map.insert(id, mac);
         
+        let freedom = if manufacturer_data.len() >= 17 {
+            match manufacturer_data[16] {
+                0 => crate::FreedomLevel::None,
+                1 => crate::FreedomLevel::WhitelistOnly,
+                2 => crate::FreedomLevel::Normal,
+                3 => crate::FreedomLevel::Full,
+                _ => crate::FreedomLevel::None,
+            }
+        } else {
+            crate::FreedomLevel::None
+        };
+
+        let is_virtual_uplink = if manufacturer_data.len() >= 18 {
+            manufacturer_data[17] == 1
+        } else {
+            false
+        };
+
         // В реальном протоколе здесь должен быть P2P-хендшейк для обмена маршрутами.
         // Пока просто добавляем узел как соседа с пустыми маршрутами.
         let mut neighbors = self.discovered_neighbors.lock().await;
@@ -49,8 +79,8 @@ impl BleRoot {
                 id,
                 status: crate::NodeStatus::Tree,
                 public_key: vec![], // Будет получено позже
-                freedom: crate::FreedomLevel::None,
-                is_virtual_uplink: false,
+                freedom,
+                is_virtual_uplink,
             },
             vec![]
         ));
