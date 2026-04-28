@@ -1,34 +1,44 @@
-name: Build & Release Android APK
+name: CI / CD
 
 on:
-  release:
-    types: [published]
-  workflow_dispatch: # Allows manual trigger from GitHub UI
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
-  build:
-    name: Compile Universal APK
+  release-please:
     runs-on: ubuntu-latest
+    outputs:
+      releases_created: ${{ steps.release.outputs.releases_created }}
+    steps:
+      - uses: googleapis/release-please-action@v4
+        id: release
 
+  build-android:
+    needs: release-please
+    name: Compile & Release APK
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
       - name: Sync Android Version with Cargo
         run: |
-          # Read the version bumped by Release Please from Cargo.toml
           VERSION=$(grep -m 1 '^version = ' crates/taiga-egui/Cargo.toml | cut -d '"' -f 2)
           echo "Building version: $VERSION"
-          
-          # Inject versionName
-          sed -i "s/versionName = \".*\"/versionName = \"${VERSION}\"/" crates/taiga-egui/android/app/build.gradle.kts
-          
-          # Calculate and inject versionCode (e.g. 1.0.2 -> 10002)
+          sed -i "s/versionName = \".*\"/versionName = \"${VERSION}\"" crates/taiga-egui/android/app/build.gradle.kts
           CLEAN_VERSION=$(echo $VERSION | cut -d'-' -f1)
           IFS='.' read -r major minor patch <<< "$CLEAN_VERSION"
           VERSION_CODE=$((major * 10000 + minor * 100 + patch))
           sed -i "s/versionCode = .*/versionCode = ${VERSION_CODE}/" crates/taiga-egui/android/app/build.gradle.kts
-          
           echo "Injected versionCode: $VERSION_CODE, versionName: $VERSION"
 
       - name: Setup Java 17
@@ -51,7 +61,6 @@ jobs:
       - name: Cache Rust Dependencies
         uses: Swatinem/rust-cache@v2
         with:
-          # Cache aggressively includes egui, tokio, reqwest
           shared-key: "android-universal-build"
 
       - name: Decode Keystore for Release
@@ -61,7 +70,7 @@ jobs:
           if [ -n "$KEYSTORE_BASE64" ]; then
             echo "$KEYSTORE_BASE64" | base64 --decode > crates/taiga-egui/android/app/release.keystore
           else
-            echo "No keystore secret found, skipping signature. Make sure to set ANDROID_KEYSTORE_BASE64 in GitHub Secrets."
+            echo "No keystore secret found, skipping signature."
           fi
 
       - name: Assemble Universal Release APK
@@ -74,14 +83,18 @@ jobs:
           chmod +x ./gradlew
           ./gradlew assembleRelease --no-daemon
 
-      - name: Upload APK as Artifact (For manual download)
+      - name: Upload APK as Artifact (Available for every commit)
         uses: actions/upload-artifact@v4
         with:
           name: TAIGA-Universal-APK
           path: crates/taiga-egui/android/app/build/outputs/apk/release/*.apk
 
       - name: Attach APK to GitHub Release
-        if: github.event_name == 'release'
-        uses: softprops/action-gh-release@v2
-        with:
-          files: crates/taiga-egui/android/app/build/outputs/apk/release/*.apk
+        if: ${{ needs.release-please.outputs.releases_created == 'true' }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Fetch the tag of the newly created release
+          TAG_NAME=$(gh release list --limit 1 | awk '{print $1}')
+          echo "Uploading APK to release $TAG_NAME"
+          gh release upload "$TAG_NAME" crates/taiga-egui/android/app/build/outputs/apk/release/*.apk --clobber
