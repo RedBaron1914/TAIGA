@@ -1,0 +1,87 @@
+name: Build & Release Android APK
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch: # Allows manual trigger from GitHub UI
+
+jobs:
+  build:
+    name: Compile Universal APK
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Sync Android Version with Cargo
+        run: |
+          # Read the version bumped by Release Please from Cargo.toml
+          VERSION=$(grep -m 1 '^version = ' crates/taiga-egui/Cargo.toml | cut -d '"' -f 2)
+          echo "Building version: $VERSION"
+          
+          # Inject versionName
+          sed -i "s/versionName = \".*\"/versionName = \"${VERSION}\"/" crates/taiga-egui/android/app/build.gradle.kts
+          
+          # Calculate and inject versionCode (e.g. 1.0.2 -> 10002)
+          CLEAN_VERSION=$(echo $VERSION | cut -d'-' -f1)
+          IFS='.' read -r major minor patch <<< "$CLEAN_VERSION"
+          VERSION_CODE=$((major * 10000 + minor * 100 + patch))
+          sed -i "s/versionCode = .*/versionCode = ${VERSION_CODE}/" crates/taiga-egui/android/app/build.gradle.kts
+          
+          echo "Injected versionCode: $VERSION_CODE, versionName: $VERSION"
+
+      - name: Setup Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v3
+
+      - name: Setup Rust Toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android, armv7-linux-androideabi, i686-linux-android, x86_64-linux-android
+
+      - name: Install cargo-ndk
+        run: cargo install cargo-ndk
+
+      - name: Cache Rust Dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          # Cache aggressively includes egui, tokio, reqwest
+          shared-key: "android-universal-build"
+
+      - name: Decode Keystore for Release
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          if [ -n "$KEYSTORE_BASE64" ]; then
+            echo "$KEYSTORE_BASE64" | base64 --decode > crates/taiga-egui/android/app/release.keystore
+          else
+            echo "No keystore secret found, skipping signature. Make sure to set ANDROID_KEYSTORE_BASE64 in GitHub Secrets."
+          fi
+
+      - name: Assemble Universal Release APK
+        working-directory: crates/taiga-egui/android
+        env:
+          ORG_GRADLE_PROJECT_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ORG_GRADLE_PROJECT_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ORG_GRADLE_PROCESS_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          chmod +x ./gradlew
+          ./gradlew assembleRelease --no-daemon
+
+      - name: Upload APK as Artifact (For manual download)
+        uses: actions/upload-artifact@v4
+        with:
+          name: TAIGA-Universal-APK
+          path: crates/taiga-egui/android/app/build/outputs/apk/release/*.apk
+
+      - name: Attach APK to GitHub Release
+        if: github.event_name == 'release'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: crates/taiga-egui/android/app/build/outputs/apk/release/*.apk
