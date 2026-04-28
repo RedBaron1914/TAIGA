@@ -1,6 +1,6 @@
 # Changelog
 
-## [1.1.0](https://github.com/RedBaron1914/TAIGA/compare/taiga-egui-v1.0.1...taiga-egui-v1.1.0) (2026-04-28)
+## [1.0.2](https://github.com/RedBaron1914/TAIGA/compare/taiga-egui-v1.0.1...taiga-egui-v1.1.0) (2026-04-28)
 
 
 ### Features
