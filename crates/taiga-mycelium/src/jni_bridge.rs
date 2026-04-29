@@ -148,8 +148,8 @@ pub extern "system" fn Java_com_taiga_mesh_MyceliumCore_onBleDeviceDiscovered<'l
     if let Ok(mac_str) = env.get_string(&mac_address) {
         let mac: String = mac_str.into();
         if let Ok(bytes) = env.convert_byte_array(&node_id_bytes) {
-            if bytes.len() == 16 {
-                if let Ok(id) = Uuid::from_slice(&bytes) {
+            if bytes.len() >= 16 {
+                if let Ok(id) = Uuid::from_slice(&bytes[0..16]) {
                     log::info!("[JNI] Найдено Дерево по BLE: MAC={}, ID={}", mac, id);
                     send_event(JniEvent::BleDeviceDiscovered(mac, bytes));
                 }
