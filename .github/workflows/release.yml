@@ -63,5 +63,7 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
-          files: crates/taiga-egui/android/app/build/outputs/apk/release/*.apk
+          files: |
+            crates/taiga-egui/android/app/build/outputs/apk/release/*.apk
+            crates/taiga-egui/android/app/build/outputs/apk/release/**/*.apk
           generate_release_notes: true
