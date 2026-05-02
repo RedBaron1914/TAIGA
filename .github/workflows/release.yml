@@ -67,3 +67,4 @@ jobs:
             crates/taiga-egui/android/app/build/outputs/apk/release/*.apk
             crates/taiga-egui/android/app/build/outputs/apk/release/**/*.apk
           generate_release_notes: true
+          draft: true
