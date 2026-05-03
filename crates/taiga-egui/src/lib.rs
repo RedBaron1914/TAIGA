@@ -325,22 +325,24 @@ impl TaigaApp {
                         let is_using_socks5 = local_streams_for_freedom.lock().await.len() > 0;
                         
                         // 1. Проверяем "Белые списки" (гос. ресурсы, крупные поисковики)
-                        let has_whitelist = _client.get("https://ya.ru").send().await.is_ok();
-                        
-                        if has_whitelist {
-                            new_freedom = taiga_mycelium::FreedomLevel::WhitelistOnly;
+                        if has_real_uplink {
+                            let has_whitelist = _client.get("https://ya.ru").send().await.map(|r| r.status().is_success()).unwrap_or(false);
                             
-                            // 2. Проверяем выход за пределы "белых списков" (обычные сайты)
-                            let has_normal = _client.get("https://coworking.tyuiu.ru").send().await.is_ok();
-                            
-                            if has_normal {
-                                new_freedom = taiga_mycelium::FreedomLevel::Normal;
+                            if has_whitelist {
+                                new_freedom = taiga_mycelium::FreedomLevel::WhitelistOnly;
                                 
-                                // 3. Проверяем полный доступ (VPN/Антизапрет)
-                                let has_full = _client.get("https://discord.com").send().await.is_ok();
+                                // 2. Проверяем выход за пределы "белых списков" (обычные сайты)
+                                let has_normal = _client.get("https://coworking.tyuiu.ru").send().await.map(|r| r.status().is_success()).unwrap_or(false);
                                 
-                                if has_full {
-                                    new_freedom = taiga_mycelium::FreedomLevel::Full;
+                                if has_normal {
+                                    new_freedom = taiga_mycelium::FreedomLevel::Normal;
+                                    
+                                    // 3. Проверяем полный доступ (VPN/Антизапрет)
+                                    let has_full = _client.get("https://discord.com").send().await.map(|r| r.status().is_success()).unwrap_or(false);
+                                    
+                                    if has_full {
+                                        new_freedom = taiga_mycelium::FreedomLevel::Full;
+                                    }
                                 }
                             }
                         }
