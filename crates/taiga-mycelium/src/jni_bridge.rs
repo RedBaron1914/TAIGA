@@ -145,6 +145,27 @@ pub fn get_saved_freedom_level() -> (i32, bool) {
     (level, is_virtual)
 }
 
+pub fn save_node_id(uuid_str: &str) {
+    if let Some(vm) = ANDROID_JVM.lock().unwrap().as_ref() {
+        if let Ok(mut env) = vm.attach_current_thread() {
+            let global_ref_opt = {
+                MYCELIUM_CORE_CLASS.lock().unwrap().as_ref().cloned()
+            };
+            if let Some(global_ref) = global_ref_opt {
+                if let Ok(jstr) = env.new_string(uuid_str) {
+                    let class = <&jni::objects::JClass>::from(global_ref.as_obj());
+                    let _ = env.call_static_method(
+                        class,
+                        "saveNodeId",
+                        "(Ljava/lang/String;)V",
+                        &[jni::objects::JValue::from(&jstr)],
+                    );
+                }
+            }
+        }
+    }
+}
+
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_com_taiga_mesh_MyceliumCore_initNodeId<'local>(
     env: JNIEnv<'local>,

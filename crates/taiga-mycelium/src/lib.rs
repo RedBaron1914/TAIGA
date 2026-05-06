@@ -144,9 +144,9 @@ impl RoutingTable {
         let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
         
         // Добавляем самого соседа (расстояние 1, путь только он сам)
-        // Защита от перезаписи хорошей инфы (например, от Wi-Fi) пустой инфой (от BLE-заглушки)
+        // Защита от перезаписи хорошей инфы пустой инфой (от BLE-заглушки)
         if let Some((existing, _)) = self.entries.get(&neighbor_id) {
-            let better_info = if neighbor_info.public_key.is_empty() || neighbor_info.freedom < existing.target_info.freedom {
+            let better_info = if neighbor_info.freedom < existing.target_info.freedom {
                 existing.target_info.clone()
             } else {
                 neighbor_info.clone()
@@ -330,6 +330,9 @@ impl Mycelium {
         }
 
         self.local_info.id = new_id;
+        
+        #[cfg(target_os = "android")]
+        crate::jni_bridge::save_node_id(&new_id.to_string());
         
         // Ротируем ключи шифрования
         let new_pub_key = self.crypto.rotate_keys();

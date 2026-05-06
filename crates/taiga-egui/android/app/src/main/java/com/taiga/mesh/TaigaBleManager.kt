@@ -10,7 +10,7 @@ import java.util.UUID
 
 @SuppressLint("MissingPermission") // В реальном проекте права запрашиваются через Activity/egui
 @Suppress("DEPRECATION")
-class TaigaBleManager(private val context: Context, private val localNodeId: ByteArray) {
+class TaigaBleManager(private val context: Context, private var localNodeId: ByteArray) {
     companion object {
         const val TAG = "TaigaBLE"
         
@@ -53,6 +53,11 @@ class TaigaBleManager(private val context: Context, private val localNodeId: Byt
         } catch (e: Exception) {
             Log.e(TAG, "Error stopping BLE: ${e.message}")
         }
+    }
+
+    fun updateNodeId(newNodeId: ByteArray) {
+        localNodeId = newNodeId
+        restartAdvertising()
     }
 
     fun restartAdvertising() {

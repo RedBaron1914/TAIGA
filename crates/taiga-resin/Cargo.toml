@@ -1,8 +1,8 @@
 [package]
 name = "taiga-resin"
-version = "1.0.4"
+version = "1.0.5"
 edition = "2024"
 
 [dependencies]
-taiga-mycelium = { version = "1.0.4", path = "../taiga-mycelium" }
+taiga-mycelium = { version = "1.0.5", path = "../taiga-mycelium" }
 uuid = { version = "1.22.0", features = ["v4"] }

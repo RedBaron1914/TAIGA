@@ -180,6 +180,15 @@ class MainActivity : GameActivity() {
         }
     }
 
+    fun updateLocalNodeId(uuidStr: String) {
+        val uuid = java.util.UUID.fromString(uuidStr)
+        val bb = java.nio.ByteBuffer.wrap(ByteArray(16))
+        bb.putLong(uuid.mostSignificantBits)
+        bb.putLong(uuid.leastSignificantBits)
+        
+        bleManager?.updateNodeId(bb.array())
+    }
+
     fun restartBleAdvertising() {
         bleManager?.restartAdvertising()
     }

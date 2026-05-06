@@ -83,6 +83,18 @@ object MyceliumCore {
             .getBoolean("is_virtual_uplink", false)
     }
 
+    @JvmStatic
+    fun saveNodeId(uuidStr: String) {
+        val act = activity ?: return
+        val prefs = act.getSharedPreferences("taiga_prefs", Context.MODE_PRIVATE)
+        prefs.edit()
+            .putString("node_id", uuidStr)
+            .apply()
+        
+        Log.i(TAG, "Node ID updated to: $uuidStr")
+        act.updateLocalNodeId(uuidStr)
+    }
+
     // Нативные функции, реализованные в Rust (jni_bridge.rs)
     
     @JvmStatic
