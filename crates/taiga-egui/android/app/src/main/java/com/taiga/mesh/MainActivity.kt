@@ -180,6 +180,10 @@ class MainActivity : GameActivity() {
         }
     }
 
+    fun restartBleAdvertising() {
+        bleManager?.restartAdvertising()
+    }
+
     private fun startWifiTransport() {
         if (wifiManager == null) {
             val p2pManager = getSystemService(Context.WIFI_P2P_SERVICE) as WifiP2pManager?

@@ -3724,7 +3724,7 @@ dependencies = [
 
 [[package]]
 name = "taiga-egui"
-version = "1.0.2"
+version = "1.0.4"
 dependencies = [
  "android-activity",
  "android_logger",
@@ -3744,7 +3744,7 @@ dependencies = [
 
 [[package]]
 name = "taiga-mycelium"
-version = "1.0.2"
+version = "1.0.4"
 dependencies = [
  "async-trait",
  "btleplug",
@@ -3767,11 +3767,11 @@ dependencies = [
 
 [[package]]
 name = "taiga-node"
-version = "1.0.1"
+version = "1.0.4"
 
 [[package]]
 name = "taiga-resin"
-version = "1.0.1"
+version = "1.0.4"
 dependencies = [
  "taiga-mycelium",
  "uuid",

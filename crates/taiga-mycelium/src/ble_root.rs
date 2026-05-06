@@ -113,6 +113,11 @@ impl Root for BleRoot {
         *self.local_info.lock().await = info;
     }
 
+    async fn update_local_routes(&self, _routes: Vec<RouteUpdate>) {
+        // BLE currently does not support pushing routes over advertising data due to size limits.
+        // This will be implemented in v1.1.0 as part of the full GATT handshake.
+    }
+
     async fn discover(&self, _local_routes: Vec<RouteUpdate>) -> Result<Vec<(TreeInfo, Vec<RouteUpdate>)>, String> {
         // Возвращаем накопленных за время сканирования соседей и очищаем список
         let mut neighbors = self.discovered_neighbors.lock().await;

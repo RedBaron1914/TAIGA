@@ -56,6 +56,33 @@ object MyceliumCore {
         return false
     }
 
+    @JvmStatic
+    fun saveFreedomLevel(level: Int, isVirtual: Boolean) {
+        val act = activity ?: return
+        val prefs = act.getSharedPreferences("taiga_prefs", Context.MODE_PRIVATE)
+        prefs.edit()
+            .putInt("freedom_level", level)
+            .putBoolean("is_virtual_uplink", isVirtual)
+            .apply()
+        
+        Log.i(TAG, "Freedom level saved to SharedPreferences: $level (Virtual: $isVirtual)")
+        act.restartBleAdvertising()
+    }
+
+    @JvmStatic
+    fun getSavedFreedomLevel(): Int {
+        val act = activity ?: return 0
+        return act.getSharedPreferences("taiga_prefs", Context.MODE_PRIVATE)
+            .getInt("freedom_level", 0)
+    }
+
+    @JvmStatic
+    fun getSavedVirtualUplink(): Boolean {
+        val act = activity ?: return false
+        return act.getSharedPreferences("taiga_prefs", Context.MODE_PRIVATE)
+            .getBoolean("is_virtual_uplink", false)
+    }
+
     // Нативные функции, реализованные в Rust (jni_bridge.rs)
     
     @JvmStatic

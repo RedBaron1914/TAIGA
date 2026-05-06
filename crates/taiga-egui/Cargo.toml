@@ -1,6 +1,6 @@
 [package]
 name = "taiga-egui"
-version = "1.0.2"
+version = "1.0.4"
 edition = "2024"
 
 [lib]
@@ -13,8 +13,8 @@ log = "0.4.29"
 rand = "0.8.5"
 reqwest = "0.13.2"
 serde_json = "1.0.149"
-taiga-mycelium = { version = "1.0.1", path = "../taiga-mycelium" }
-taiga-resin = { version = "1.0.1", path = "../taiga-resin" }
+taiga-mycelium = { version = "1.0.4", path = "../taiga-mycelium" }
+taiga-resin = { version = "1.0.4", path = "../taiga-resin" }
 tokio = { version = "1.52.1", features = ["full"] }
 uuid = { version = "1.23.1", features = ["v4"] }
 x25519-dalek = "2.0.1"

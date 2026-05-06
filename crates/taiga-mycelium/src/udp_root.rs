@@ -24,13 +24,14 @@ pub struct UdpRoot {
     peers: Arc<Mutex<HashMap<TreeId, (SocketAddr, TreeInfo, Vec<RouteUpdate>)>>>,
     needle_rx: Arc<Mutex<mpsc::Receiver<(TreeId, Needle)>>>,
     cached_id: String,
+    cached_routes: Arc<Mutex<Vec<RouteUpdate>>>,
 }
 
 impl UdpRoot {
     pub async fn new(port: u16, local_info: TreeInfo) -> Result<Self, String> {
         let addr = format!("0.0.0.0:{}", port);
         let socket = UdpSocket::bind(&addr).await.map_err(|e| e.to_string())?;
-        
+
         log::info!("[UdpRoot] Привязан к локальному порту: {}", port);
 
         let socket = Arc::new(socket);
@@ -38,10 +39,12 @@ impl UdpRoot {
         let (needle_tx, needle_rx) = mpsc::channel(100);
         let cached_id = format!("udp-root-{}", local_info.id);
         let local_info = Arc::new(Mutex::new(local_info));
+        let cached_routes = Arc::new(Mutex::new(vec![]));
 
         let sock_clone = socket.clone();
         let peers_clone = peers.clone();
         let local_info_clone = local_info.clone();
+        let cached_routes_clone = cached_routes.clone();
 
         tokio::spawn(async move {
             let mut buf = [0u8; 65535];
@@ -58,12 +61,12 @@ impl UdpRoot {
                                     peers_clone.lock().await.insert(info.id, (addr, info, routes));
 
                                     // Отвечаем кто мы
-                                    let req = UdpPacket::DiscoverResponse(current_info, vec![]);
+                                    let current_routes = cached_routes_clone.lock().await.clone();
+                                    let req = UdpPacket::DiscoverResponse(current_info, current_routes);
                                     let req_bytes = serde_json::to_vec(&req).unwrap();
                                     let _ = sock_clone.send_to(&req_bytes, addr).await;
                                 }
-                                }
-                                UdpPacket::DiscoverResponse(info, routes) => {
+                            }                                UdpPacket::DiscoverResponse(info, routes) => {
                                 log::info!("[UdpRoot] Найден сосед! Дерево: {} (IP: {})", info.id, addr);
                                 #[cfg(target_os = "android")]
                                 crate::jni_bridge::send_ui_log("WIFI", &format!("UDP: Найден сосед! Дерево: {} (IP: {})", info.id, addr));
@@ -92,6 +95,7 @@ impl UdpRoot {
             peers,
             needle_rx: Arc::new(Mutex::new(needle_rx)),
             cached_id,
+            cached_routes,
         })
     }
 }
@@ -123,6 +127,10 @@ impl Root for UdpRoot {
 
     async fn update_local_info(&self, info: TreeInfo) {
         *self.local_info.lock().await = info;
+    }
+
+    async fn update_local_routes(&self, routes: Vec<RouteUpdate>) {
+        *self.cached_routes.lock().await = routes;
     }
 
     async fn send_needle(&self, to: TreeId, needle: Needle) -> Result<(), String> {

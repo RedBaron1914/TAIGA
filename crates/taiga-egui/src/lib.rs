@@ -41,11 +41,24 @@ impl TaigaApp {
         let port: u16 = (rand::random::<u16>() % 21) + 40000; 
 
         #[cfg(target_os = "android")]
-        let id = taiga_mycelium::jni_bridge::get_android_node_id().unwrap_or_else(Uuid::new_v4);
+        let (id, saved_freedom, saved_is_virtual) = {
+            let node_id = taiga_mycelium::jni_bridge::get_android_node_id().unwrap_or_else(Uuid::new_v4);
+            let (level, is_virtual) = taiga_mycelium::jni_bridge::get_saved_freedom_level();
+            let freedom = match level {
+                1 => taiga_mycelium::FreedomLevel::WhitelistOnly,
+                2 => taiga_mycelium::FreedomLevel::Normal,
+                3 => taiga_mycelium::FreedomLevel::Full,
+                _ => taiga_mycelium::FreedomLevel::None,
+            };
+            (node_id, freedom, is_virtual)
+        };
+
         #[cfg(not(target_os = "android"))]
-        let id = Uuid::new_v4();
+        let (id, saved_freedom, saved_is_virtual) = (Uuid::new_v4(), taiga_mycelium::FreedomLevel::None, false);
 
         let mut m = Mycelium::new(id, NodeStatus::Tree);
+        m.local_info.freedom = saved_freedom;
+        m.local_info.is_virtual_uplink = saved_is_virtual;
         
         let _ = std::fs::create_dir_all(&app_data_dir);
         let dtn_path = app_data_dir.join(format!("taiga_dtn_{}.redb", id));
@@ -311,6 +324,7 @@ impl TaigaApp {
                     let _client = reqwest::Client::builder()
                         .timeout(std::time::Duration::from_secs(3))
                         .danger_accept_invalid_certs(true)
+                        .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
                         .build()
                         .unwrap();
 
@@ -415,6 +429,7 @@ impl TaigaApp {
                                         }
                                     }
                         }
+                        
                         ctx_for_scan.request_repaint();
                     }
 
@@ -430,6 +445,14 @@ impl TaigaApp {
                         let stale_routes = m_guard.routing_table.cleanup_stale_routes(300); // 5 минут TTL
                         if stale_routes > 0 {
                             let _ = tx_for_scan.send(LogEvent { level: "ROUTING".to_string(), message: format!("Очищено {} мертвых маршрутов", stale_routes) });
+                        }
+                        
+                        // Push updated routes to all roots unconditionally (handles both additions and deletions)
+                        if had_changes || stale_routes > 0 {
+                            let updated_routes = m_guard.get_local_routes();
+                            for root in &m_guard.roots {
+                                root.update_local_routes(updated_routes.clone()).await;
+                            }
                         }
                         
                         if let Some(dtn) = &m_guard.dtn {

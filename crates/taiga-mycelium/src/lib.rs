@@ -106,6 +106,9 @@ pub trait Root: Send + Sync {
     /// Обновить метаданные о себе для отправки при знакомстве (включая маршруты)
     async fn update_local_info(&self, info: TreeInfo);
 
+    /// Протолкнуть актуальную таблицу маршрутов интерфейсу для фонового обмена
+    async fn update_local_routes(&self, routes: Vec<RouteUpdate>);
+
     /// Отправить фрагмент данных (Хвоинку) конкретному соседу
     async fn send_needle(&self, to: TreeId, needle: Needle) -> Result<(), String>;
 
@@ -292,6 +295,18 @@ impl Mycelium {
             self.local_info.freedom = freedom;
             self.local_info.is_virtual_uplink = is_virtual_uplink;
             let updated_info = self.local_info.clone();
+            
+            #[cfg(target_os = "android")]
+            {
+                let level_int = match freedom {
+                    FreedomLevel::None => 0,
+                    FreedomLevel::WhitelistOnly => 1,
+                    FreedomLevel::Normal => 2,
+                    FreedomLevel::Full => 3,
+                };
+                crate::jni_bridge::save_freedom_level(level_int, is_virtual_uplink);
+            }
+
             for root in &self.roots {
                 root.update_local_info(updated_info.clone()).await;
             }

@@ -100,6 +100,51 @@ pub fn has_physical_internet() -> bool {
     false
 }
 
+pub fn save_freedom_level(level: i32, is_virtual: bool) {
+    if let Some(vm) = ANDROID_JVM.lock().unwrap().as_ref() {
+        if let Ok(mut env) = vm.attach_current_thread() {
+            let global_ref_opt = {
+                MYCELIUM_CORE_CLASS.lock().unwrap().as_ref().cloned()
+            };
+            if let Some(global_ref) = global_ref_opt {
+                let class = <&jni::objects::JClass>::from(global_ref.as_obj());
+                let _ = env.call_static_method(
+                    class,
+                    "saveFreedomLevel",
+                    "(IZ)V",
+                    &[
+                        jni::objects::JValue::from(level),
+                        jni::objects::JValue::from(is_virtual as jni::sys::jboolean),
+                    ],
+                );
+            }
+        }
+    }
+}
+
+pub fn get_saved_freedom_level() -> (i32, bool) {
+    let mut level = 0;
+    let mut is_virtual = false;
+
+    if let Some(vm) = ANDROID_JVM.lock().unwrap().as_ref() {
+        if let Ok(mut env) = vm.attach_current_thread() {
+            let global_ref_opt = {
+                MYCELIUM_CORE_CLASS.lock().unwrap().as_ref().cloned()
+            };
+            if let Some(global_ref) = global_ref_opt {
+                let class = <&jni::objects::JClass>::from(global_ref.as_obj());
+                if let Ok(res_level) = env.call_static_method(class, "getSavedFreedomLevel", "()I", &[]) {
+                    level = res_level.i().unwrap_or(0);
+                }
+                if let Ok(res_virtual) = env.call_static_method(class, "getSavedVirtualUplink", "()Z", &[]) {
+                    is_virtual = res_virtual.z().unwrap_or(false);
+                }
+            }
+        }
+    }
+    (level, is_virtual)
+}
+
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_com_taiga_mesh_MyceliumCore_initNodeId<'local>(
     env: JNIEnv<'local>,

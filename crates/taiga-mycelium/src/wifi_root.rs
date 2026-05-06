@@ -24,6 +24,8 @@ pub struct WifiRoot {
     cached_id: String,
     /// Канал для трансляции всем подключенным пирам (для discover и broadcast)
     broadcast_tx: mpsc::Sender<TcpPacket>,
+    /// Кэшированные маршруты для мгновенных ответов на DiscoverRequest
+    cached_routes: Arc<Mutex<Vec<RouteUpdate>>>,
 }
 
 impl WifiRoot {
@@ -34,6 +36,7 @@ impl WifiRoot {
         let peers = Arc::new(Mutex::new(HashMap::new()));
         let local_info = Arc::new(Mutex::new(local_info.clone()));
         let cached_id = format!("wifi-root-{}", local_info.lock().await.id);
+        let cached_routes = Arc::new(Mutex::new(vec![]));
         
         let (broadcast_tx, mut broadcast_rx) = mpsc::channel::<TcpPacket>(100);
 
@@ -43,6 +46,7 @@ impl WifiRoot {
             needle_rx: Arc::new(Mutex::new(needle_rx)),
             cached_id,
             broadcast_tx,
+            cached_routes: cached_routes.clone(),
         };
 
         // Запускаем рассыльщик броадкастов (Шепот Леса / Discover) по всем TCP соединениям
@@ -71,7 +75,7 @@ impl WifiRoot {
                     log::info!("[WifiRoot] Новое входящее TCP-подключение от {}", addr);
                     #[cfg(target_os = "android")]
                     crate::jni_bridge::send_ui_log("WIFI", &format!("Новое входящее P2P-подключение от {}", addr));
-                    Self::handle_connection(stream, local_info_clone.clone(), peers_clone.clone(), needle_tx_clone.clone());
+                    Self::handle_connection(stream, local_info_clone.clone(), peers_clone.clone(), needle_tx_clone.clone(), cached_routes.clone());
                 }
             });
         } else {
@@ -100,7 +104,7 @@ impl WifiRoot {
             log::info!("[WifiRoot] Успешно подключено к GO!");
             #[cfg(target_os = "android")]
             crate::jni_bridge::send_ui_log("WIFI", "Успешно подключено к Group Owner!");
-            Self::handle_connection(stream, local_info.clone(), peers.clone(), needle_tx.clone());
+            Self::handle_connection(stream, local_info.clone(), peers.clone(), needle_tx.clone(), cached_routes.clone());
         }
 
         Ok(root)
@@ -110,7 +114,8 @@ impl WifiRoot {
         stream: TcpStream, 
         local_info: Arc<Mutex<TreeInfo>>, 
         peers: Arc<Mutex<HashMap<TreeId, (mpsc::Sender<TcpPacket>, TreeInfo, Vec<RouteUpdate>)>>>,
-        needle_tx: mpsc::Sender<(TreeId, Needle)>
+        needle_tx: mpsc::Sender<(TreeId, Needle)>,
+        cached_routes: Arc<Mutex<Vec<RouteUpdate>>>,
     ) {
         tokio::spawn(async move {
             let (mut reader, mut writer) = stream.into_split();
@@ -129,7 +134,8 @@ impl WifiRoot {
 
             // Сразу после подключения шлем DiscoverRequest
             let info = local_info.lock().await.clone();
-            let _ = tx.send(TcpPacket::DiscoverRequest(info, vec![])).await; // Для старта пусто
+            let start_routes = cached_routes.lock().await.clone();
+            let _ = tx.send(TcpPacket::DiscoverRequest(info, start_routes)).await;
             
             let mut length_buf = [0u8; 4];
             loop {
@@ -145,8 +151,10 @@ impl WifiRoot {
                             log::info!("[WifiRoot] Получен запрос на поиск от {}", peer_info.id);
                             peers.lock().await.insert(peer_info.id, (tx.clone(), peer_info, routes));
                             
+                            // Отвечаем нашими текущими маршрутами
                             let info = local_info.lock().await.clone();
-                            let _ = tx.send(TcpPacket::DiscoverResponse(info, vec![])).await;
+                            let current_routes = cached_routes.lock().await.clone();
+                            let _ = tx.send(TcpPacket::DiscoverResponse(info, current_routes)).await;
                         }
                         TcpPacket::DiscoverResponse(peer_info, routes) => {
                             log::info!("[WifiRoot] Ответ от соседа: {}", peer_info.id);
@@ -190,6 +198,10 @@ impl Root for WifiRoot {
 
     async fn update_local_info(&self, info: TreeInfo) {
         *self.local_info.lock().await = info;
+    }
+
+    async fn update_local_routes(&self, routes: Vec<RouteUpdate>) {
+        *self.cached_routes.lock().await = routes;
     }
 
     async fn send_needle(&self, to: TreeId, needle: Needle) -> Result<(), String> {

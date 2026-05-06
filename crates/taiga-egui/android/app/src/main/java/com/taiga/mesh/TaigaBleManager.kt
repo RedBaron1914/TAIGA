@@ -55,6 +55,16 @@ class TaigaBleManager(private val context: Context, private val localNodeId: Byt
         }
     }
 
+    fun restartAdvertising() {
+        try {
+            advertiseCallback?.let { bleAdvertiser?.stopAdvertising(it) }
+            startAdvertising()
+            Log.i(TAG, "BLE Advertising restarted with updated Manufacturer Data.")
+        } catch (e: Exception) {
+            Log.e(TAG, "Error restarting BLE Advertising: ${e.message}")
+        }
+    }
+
     private fun startGattServer() {
         val serverCallback = object : BluetoothGattServerCallback() {
             override fun onConnectionStateChange(device: BluetoothDevice, status: Int, newState: Int) {
