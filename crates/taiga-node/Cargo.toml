@@ -1,0 +1,6 @@
+[package]
+name = "taiga-node"
+version = "1.0.6"
+edition = "2024"
+
+[dependencies]

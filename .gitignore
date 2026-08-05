@@ -1,0 +1,30 @@
+# Rust
+/target
+Cargo.lock
+
+# Android
+/crates/taiga-egui/android/.gradle
+/crates/taiga-egui/android/build
+/crates/taiga-egui/android/app/build
+/crates/taiga-egui/android/app/src/main/jniLibs
+crates/taiga-egui/android/gradle-*
+crates/taiga-egui/android/gradle.zip
+*.keystore
+local.properties
+
+# Project specific
+/.taiga_data
+*.log
+*.iml
+
+# IDEs
+/.idea
+/.vscode
+.DS_Store
+
+# Assets
+icon.png
+
+# Temporary test files
+test_*.rs
+test_*.gradle.kts

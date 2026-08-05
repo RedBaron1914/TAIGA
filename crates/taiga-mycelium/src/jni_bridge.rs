@@ -1,0 +1,295 @@
+#![cfg(target_os = "android")]
+
+use jni::JNIEnv;
+use jni::objects::{JClass, JString, JByteArray};
+use uuid::Uuid;
+use std::sync::Mutex;
+use std::sync::Arc;
+use lazy_static::lazy_static;
+
+#[derive(Debug, Clone)]
+pub enum JniEvent {
+    BleDeviceDiscovered(String, Vec<u8>),
+    BleMessageReceived(String, Vec<u8>),
+    WifiDirectConnected { ip: String, is_group_owner: bool },
+    WifiDirectDisconnected,
+    UiLog(String, String),
+}
+
+lazy_static! {
+    pub static ref JNI_EVENT_TX: Arc<Mutex<Option<std::sync::mpsc::Sender<JniEvent>>>> = Arc::new(Mutex::new(None));
+    pub static ref ANDROID_NODE_ID: Arc<Mutex<Option<Uuid>>> = Arc::new(Mutex::new(None));
+    pub static ref ANDROID_JVM: Arc<Mutex<Option<jni::JavaVM>>> = Arc::new(Mutex::new(None));
+    pub static ref MYCELIUM_CORE_CLASS: Arc<Mutex<Option<jni::objects::GlobalRef>>> = Arc::new(Mutex::new(None));
+    /// Уровень свободы, переданный при старте из Kotlin (до запуска Tokio-рантайма)
+    pub static ref ANDROID_FREEDOM_LEVEL: Arc<Mutex<Option<(i32, bool)>>> = Arc::new(Mutex::new(None));
+}
+
+pub fn send_ui_log(level: &str, msg: &str) {
+    send_event(JniEvent::UiLog(level.to_string(), msg.to_string()));
+}
+
+pub fn send_ble_message_to_kotlin(mac: &str, payload: &[u8]) {
+    if let Some(vm) = ANDROID_JVM.lock().unwrap().as_ref() {
+        if let Ok(mut env) = vm.attach_current_thread() {
+            let global_ref_opt = {
+                MYCELIUM_CORE_CLASS.lock().unwrap().as_ref().cloned()
+            };
+            if let Some(global_ref) = global_ref_opt {
+                if let Ok(mac_jstring) = env.new_string(mac) {
+                    if let Ok(payload_jbytearray) = env.byte_array_from_slice(payload) {
+                        let class = <&jni::objects::JClass>::from(global_ref.as_obj());
+                        let _ = env.call_static_method(
+                            class,
+                            "sendBleMessage",
+                            "(Ljava/lang/String;[B)V",
+                            &[jni::objects::JValue::from(&mac_jstring), jni::objects::JValue::from(&payload_jbytearray)],
+                        );
+                    }
+                }
+            }
+        }
+    }
+}
+
+pub fn get_android_node_id() -> Option<Uuid> {
+    *ANDROID_NODE_ID.lock().unwrap()
+}
+
+pub fn ping_bypassing_vpn(url: &str) -> bool {
+    if let Some(vm) = ANDROID_JVM.lock().unwrap().as_ref() {
+        if let Ok(mut env) = vm.attach_current_thread() {
+            let global_ref_opt = {
+                MYCELIUM_CORE_CLASS.lock().unwrap().as_ref().cloned()
+            };
+            if let Some(global_ref) = global_ref_opt {
+                if let Ok(url_jstring) = env.new_string(url) {
+                    let class = <&jni::objects::JClass>::from(global_ref.as_obj());
+                    if let Ok(result) = env.call_static_method(
+                        class,
+                        "pingBypassingVpn",
+                        "(Ljava/lang/String;)Z",
+                        &[jni::objects::JValue::from(&url_jstring)],
+                    ) {
+                        return result.z().unwrap_or(false);
+                    }
+                }
+            }
+        }
+    }
+    false
+}
+
+pub fn has_physical_internet() -> bool {
+    if let Some(vm) = ANDROID_JVM.lock().unwrap().as_ref() {
+        if let Ok(mut env) = vm.attach_current_thread() {
+            let global_ref_opt = {
+                MYCELIUM_CORE_CLASS.lock().unwrap().as_ref().cloned()
+            };
+            if let Some(global_ref) = global_ref_opt {
+                let class = <&jni::objects::JClass>::from(global_ref.as_obj());
+                if let Ok(result) = env.call_static_method(
+                    class,
+                    "hasPhysicalInternet",
+                    "()Z",
+                    &[],
+                ) {
+                    return result.z().unwrap_or(false);
+                }
+            }
+        }
+    }
+    false
+}
+
+pub fn save_freedom_level(level: i32, is_virtual: bool) {
+    if let Some(vm) = ANDROID_JVM.lock().unwrap().as_ref() {
+        if let Ok(mut env) = vm.attach_current_thread() {
+            let global_ref_opt = {
+                MYCELIUM_CORE_CLASS.lock().unwrap().as_ref().cloned()
+            };
+            if let Some(global_ref) = global_ref_opt {
+                let class = <&jni::objects::JClass>::from(global_ref.as_obj());
+                let _ = env.call_static_method(
+                    class,
+                    "saveFreedomLevel",
+                    "(IZ)V",
+                    &[
+                        jni::objects::JValue::from(level),
+                        jni::objects::JValue::from(is_virtual as jni::sys::jboolean),
+                    ],
+                );
+            }
+        }
+    }
+}
+
+pub fn get_saved_freedom_level() -> (i32, bool) {
+    // Читаем напрямую из статики, установленной через initNodeId — это гарантированно работает при старте
+    if let Some(saved) = *ANDROID_FREEDOM_LEVEL.lock().unwrap() {
+        return saved;
+    }
+    // Fallback: если по какой-то причине статика не установлена, идем через JNI
+    let mut level = 0;
+    let mut is_virtual = false;
+    if let Some(vm) = ANDROID_JVM.lock().unwrap().as_ref() {
+        if let Ok(mut env) = vm.attach_current_thread() {
+            let global_ref_opt = {
+                MYCELIUM_CORE_CLASS.lock().unwrap().as_ref().cloned()
+            };
+            if let Some(global_ref) = global_ref_opt {
+                let class = <&jni::objects::JClass>::from(global_ref.as_obj());
+                if let Ok(res_level) = env.call_static_method(class, "getSavedFreedomLevel", "()I", &[]) {
+                    level = res_level.i().unwrap_or(0);
+                }
+                if let Ok(res_virtual) = env.call_static_method(class, "getSavedVirtualUplink", "()Z", &[]) {
+                    is_virtual = res_virtual.z().unwrap_or(false);
+                }
+            }
+        }
+    }
+    (level, is_virtual)
+}
+
+pub fn save_node_id(uuid_str: &str) {
+    if let Some(vm) = ANDROID_JVM.lock().unwrap().as_ref() {
+        if let Ok(mut env) = vm.attach_current_thread() {
+            let global_ref_opt = {
+                MYCELIUM_CORE_CLASS.lock().unwrap().as_ref().cloned()
+            };
+            if let Some(global_ref) = global_ref_opt {
+                if let Ok(jstr) = env.new_string(uuid_str) {
+                    let class = <&jni::objects::JClass>::from(global_ref.as_obj());
+                    let _ = env.call_static_method(
+                        class,
+                        "saveNodeId",
+                        "(Ljava/lang/String;)V",
+                        &[jni::objects::JValue::from(&jstr)],
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_com_taiga_mesh_MyceliumCore_initNodeId<'local>(
+    env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    node_id_bytes: JByteArray<'local>,
+    freedom_level: jni::sys::jint,
+    is_virtual: jni::sys::jboolean,
+) {
+    if let Ok(vm) = env.get_java_vm() {
+        let mut lock = ANDROID_JVM.lock().unwrap();
+        *lock = Some(vm);
+    }
+    
+    if let Ok(global_class) = env.new_global_ref(&_class) {
+        let mut lock = MYCELIUM_CORE_CLASS.lock().unwrap();
+        *lock = Some(global_class);
+    }
+
+    if let Ok(bytes) = env.convert_byte_array(&node_id_bytes) {
+        if bytes.len() == 16 {
+            if let Ok(id) = Uuid::from_slice(&bytes) {
+                let mut lock = ANDROID_NODE_ID.lock().unwrap();
+                *lock = Some(id);
+                log::info!("[JNI] Инициализирован Node ID из Android: {}", id);
+            }
+        }
+    }
+    
+    // Сохраняем уровень свободы сразу, чтобы Rust мог его прочитать при старте
+    {
+        let mut lock = ANDROID_FREEDOM_LEVEL.lock().unwrap();
+        *lock = Some((freedom_level, is_virtual != 0));
+    }
+    log::info!("[JNI] Начальный уровень свободы: {} (virtual={})", freedom_level, is_virtual != 0);
+}
+
+pub fn set_jni_sender(tx: std::sync::mpsc::Sender<JniEvent>) {
+    let mut lock = JNI_EVENT_TX.lock().unwrap();
+    *lock = Some(tx);
+}
+
+fn send_event(event: JniEvent) {
+    if let Some(tx) = JNI_EVENT_TX.lock().unwrap().as_ref() {
+        let _ = tx.send(event);
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_com_taiga_mesh_MyceliumCore_onBleDeviceDiscovered<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    mac_address: JString<'local>,
+    node_id_bytes: JByteArray<'local>,
+) {
+    if let Ok(mac_str) = env.get_string(&mac_address) {
+        let mac: String = mac_str.into();
+        if let Ok(bytes) = env.convert_byte_array(&node_id_bytes) {
+            if bytes.len() >= 16 {
+                if let Ok(id) = Uuid::from_slice(&bytes[0..16]) {
+                    log::info!("[JNI] Найдено Дерево по BLE: MAC={}, ID={}", mac, id);
+                    send_event(JniEvent::BleDeviceDiscovered(mac, bytes));
+                }
+            }
+        }
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_com_taiga_mesh_MyceliumCore_onBleMessageReceived<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    sender_mac: JString<'local>,
+    payload: JByteArray<'local>,
+) {
+    if let Ok(mac_str) = env.get_string(&sender_mac) {
+        let mac: String = mac_str.into();
+        if let Ok(data) = env.convert_byte_array(&payload) {
+            log::info!("[JNI] Получены байты ({} шт.) по BLE от {}", data.len(), mac);
+            send_event(JniEvent::BleMessageReceived(mac, data));
+        }
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_com_taiga_mesh_MyceliumCore_onWifiDirectConnected<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    ip_address: JString<'local>,
+    is_group_owner: jni::sys::jboolean,
+) {
+    if let Ok(ip_str) = env.get_string(&ip_address) {
+        let ip: String = ip_str.into();
+        let is_go = is_group_owner != 0;
+        
+        log::info!("[JNI] Wi-Fi Direct Connected! IP: {}, GroupOwner: {}", ip, is_go);
+        send_event(JniEvent::WifiDirectConnected { ip, is_group_owner: is_go });
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_com_taiga_mesh_MyceliumCore_onWifiDirectDisconnected<'local>(
+    _env: JNIEnv<'local>,
+    _class: JClass<'local>,
+) {
+    log::info!("[JNI] Wi-Fi Direct Disconnected!");
+    send_event(JniEvent::WifiDirectDisconnected);
+}
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_com_taiga_mesh_MyceliumCore_sendLogToRust<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    level: JString<'local>,
+    message: JString<'local>,
+) {
+    if let Ok(lvl) = env.get_string(&level) {
+        if let Ok(msg) = env.get_string(&message) {
+            send_ui_log(&String::from(lvl), &String::from(msg));
+        }
+    }
+}
