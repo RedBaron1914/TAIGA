@@ -16,6 +16,11 @@
     <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />
     <!-- Для Android 13+ для работы с Wi-Fi Direct без геолокации -->
     <uses-permission android:name="android.permission.NEARBY_WIFI_DEVICES" />
+    
+    <!-- Права для Foreground Service -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <application
         android:allowBackup="true"
@@ -37,5 +42,12 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- Фоновая служба для поддержания Mesh-сети -->
+        <service
+            android:name=".TaigaService"
+            android:enabled="true"
+            android:exported="false"
+            android:foregroundServiceType="connectedDevice" />
     </application>
 </manifest>

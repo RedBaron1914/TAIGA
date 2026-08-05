@@ -365,7 +365,9 @@ impl TaigaApp {
                         let mut new_freedom = taiga_mycelium::FreedomLevel::None;
                         
                         #[cfg(target_os = "android")]
-                        let has_real_uplink = taiga_mycelium::jni_bridge::has_physical_internet();
+                        let has_real_uplink = tokio::task::spawn_blocking(|| {
+                            taiga_mycelium::jni_bridge::has_physical_internet()
+                        }).await.unwrap_or(false);
                         #[cfg(not(target_os = "android"))]
                         let has_real_uplink = true;
 
@@ -403,7 +405,6 @@ impl TaigaApp {
                                 changed = true;
                             }
                         }
-
                         if changed {
                             let _ = tx_for_freedom.send(LogEvent {
                                 level: "SYSTEM".to_string(),
@@ -412,7 +413,16 @@ impl TaigaApp {
                             ctx_for_freedom.request_repaint();
                         }
 
-                        tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+                        if changed {
+                            #[cfg(target_os = "android")]
+                            taiga_mycelium::jni_bridge::save_freedom_level(new_freedom.clone() as i32, !has_real_uplink || is_using_socks5);
+                        }
+
+                        if new_freedom == taiga_mycelium::FreedomLevel::None {
+                            tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                        } else {
+                            tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+                        }
                     }
                 });
 

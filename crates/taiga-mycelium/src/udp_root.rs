@@ -35,7 +35,7 @@ impl UdpRoot {
         log::info!("[UdpRoot] Привязан к локальному порту: {}", port);
 
         let socket = Arc::new(socket);
-        let peers = Arc::new(Mutex::new(HashMap::new()));
+        let peers: Arc<Mutex<HashMap<TreeId, (SocketAddr, TreeInfo, Vec<RouteUpdate>)>>> = Arc::new(Mutex::new(HashMap::new()));
         let (needle_tx, needle_rx) = mpsc::channel(100);
         let cached_id = format!("udp-root-{}", local_info.id);
         let local_info = Arc::new(Mutex::new(local_info));
@@ -58,20 +58,59 @@ impl UdpRoot {
                                     log::info!("[UdpRoot] Получен запрос на поиск от Дерева: {} (IP: {})", info.id, addr);
                                     #[cfg(target_os = "android")]
                                     crate::jni_bridge::send_ui_log("WIFI", &format!("UDP: Получен запрос на поиск от Дерева: {} (IP: {})", info.id, addr));
-                                    peers_clone.lock().await.insert(info.id, (addr, info, routes));
+                                    
+                                    {
+                                        let mut peers_guard = peers_clone.lock().await;
+                                        if let Some((_, _, existing_routes)) = peers_guard.get_mut(&info.id) {
+                                            for r in routes {
+                                                if let Some(pos) = existing_routes.iter().position(|x| x.target_info.id == r.target_info.id) {
+                                                    existing_routes[pos] = r;
+                                                } else {
+                                                    existing_routes.push(r);
+                                                }
+                                            }
+                                        } else {
+                                            peers_guard.insert(info.id, (addr, info, routes));
+                                        }
+                                    }
 
-                                    // Отвечаем кто мы
+                                    // Отвечаем кто мы (чанками по 10 маршрутов)
                                     let current_routes = cached_routes_clone.lock().await.clone();
-                                    let req = UdpPacket::DiscoverResponse(current_info, current_routes);
-                                    let req_bytes = serde_json::to_vec(&req).unwrap();
-                                    let _ = sock_clone.send_to(&req_bytes, addr).await;
+                                    if current_routes.is_empty() {
+                                        let req = UdpPacket::DiscoverResponse(current_info.clone(), vec![]);
+                                        if let Ok(req_bytes) = serde_json::to_vec(&req) {
+                                            let _ = sock_clone.send_to(&req_bytes, addr).await;
+                                        }
+                                    } else {
+                                        for chunk in current_routes.chunks(10) {
+                                            let req = UdpPacket::DiscoverResponse(current_info.clone(), chunk.to_vec());
+                                            if let Ok(req_bytes) = serde_json::to_vec(&req) {
+                                                let _ = sock_clone.send_to(&req_bytes, addr).await;
+                                            }
+                                        }
+                                    }
                                 }
-                            }                                UdpPacket::DiscoverResponse(info, routes) => {
+                            }
+                            UdpPacket::DiscoverResponse(info, routes) => {
                                 log::info!("[UdpRoot] Найден сосед! Дерево: {} (IP: {})", info.id, addr);
                                 #[cfg(target_os = "android")]
                                 crate::jni_bridge::send_ui_log("WIFI", &format!("UDP: Найден сосед! Дерево: {} (IP: {})", info.id, addr));
-                                peers_clone.lock().await.insert(info.id, (addr, info, routes));
+                                
+                                {
+                                    let mut peers_guard = peers_clone.lock().await;
+                                    if let Some((_, _, existing_routes)) = peers_guard.get_mut(&info.id) {
+                                        for r in routes {
+                                            if let Some(pos) = existing_routes.iter().position(|x| x.target_info.id == r.target_info.id) {
+                                                existing_routes[pos] = r;
+                                            } else {
+                                                existing_routes.push(r);
+                                            }
+                                        }
+                                    } else {
+                                        peers_guard.insert(info.id, (addr, info, routes));
+                                    }
                                 }
+                            }
                             UdpPacket::NeedlePayload(needle) => {
                                 log::info!("[UdpRoot] Получена Хвоинка от {}", addr);
                                 let mut sender_id = uuid::Uuid::nil();
@@ -109,13 +148,29 @@ impl Root for UdpRoot {
     async fn discover(&self, local_routes: Vec<RouteUpdate>) -> Result<Vec<(TreeInfo, Vec<RouteUpdate>)>, String> {
         log::info!("[UdpRoot] Пускаем корни... Ищем соседей!");
         let info = self.local_info.lock().await.clone();
-        let req = UdpPacket::DiscoverRequest(info, local_routes);
-        let bytes = serde_json::to_vec(&req).map_err(|e| e.to_string())?;
 
-        for p in 40000..=40020 {
-            if p != self.local_port {
-                let addr = format!("127.0.0.1:{}", p);
-                let _ = self.socket.send_to(&bytes, &addr).await;
+        // Отправляем запросы чанками по 10 маршрутов
+        let mut packets = vec![];
+        if local_routes.is_empty() {
+            let req = UdpPacket::DiscoverRequest(info.clone(), vec![]);
+            if let Ok(bytes) = serde_json::to_vec(&req) {
+                packets.push(bytes);
+            }
+        } else {
+            for chunk in local_routes.chunks(10) {
+                let req = UdpPacket::DiscoverRequest(info.clone(), chunk.to_vec());
+                if let Ok(bytes) = serde_json::to_vec(&req) {
+                    packets.push(bytes);
+                }
+            }
+        }
+
+        for bytes in packets {
+            for p in 40000..=40020 {
+                if p != self.local_port {
+                    let addr = format!("127.0.0.1:{}", p);
+                    let _ = self.socket.send_to(&bytes, &addr).await;
+                }
             }
         }
         

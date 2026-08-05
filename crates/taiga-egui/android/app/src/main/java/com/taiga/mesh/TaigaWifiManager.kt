@@ -24,8 +24,8 @@ class TaigaWifiManager(
     }
 
     private val peers = mutableListOf<WifiP2pDevice>()
-
     private var isConnecting = false
+    private val lastConnectAttemptMap = java.util.concurrent.ConcurrentHashMap<String, Long>()
 
     private val peerListListener = WifiP2pManager.PeerListListener { peerList ->
         val refreshedPeers = peerList.deviceList
@@ -35,11 +35,16 @@ class TaigaWifiManager(
             Log.i(TAG, "Found ${peers.size} Wi-Fi Direct peers")
             MyceliumCore.sendLogToRust("WIFI", "Обнаружено P2P сородичей по Wi-Fi Direct: ${peers.size}")
             
-            // Автоматически пытаемся подключиться к первому доступному пиру
+            // Подключаемся к доступному пиру с 60-секундным кулдауном, чтобы не спамить системными окнами ОС
             if (!isConnecting && peers.isNotEmpty()) {
-                val availablePeer = peers.firstOrNull { it.status == WifiP2pDevice.AVAILABLE }
+                val now = System.currentTimeMillis()
+                val availablePeer = peers.firstOrNull { 
+                    it.status == WifiP2pDevice.AVAILABLE && 
+                    (now - (lastConnectAttemptMap[it.deviceAddress] ?: 0L) > 60000)
+                }
                 if (availablePeer != null) {
                     isConnecting = true
+                    lastConnectAttemptMap[availablePeer.deviceAddress] = now
                     connectTo(availablePeer.deviceAddress)
                 }
             }
@@ -49,14 +54,19 @@ class TaigaWifiManager(
     private val connectionInfoListener = WifiP2pManager.ConnectionInfoListener { info ->
         isConnecting = false
         val groupOwnerAddress = info.groupOwnerAddress?.hostAddress
+        if (groupOwnerAddress.isNullOrBlank()) {
+            Log.w(TAG, "Group Owner address is null or blank, ignoring connection callback")
+            return@ConnectionInfoListener
+        }
+
         if (info.groupFormed && info.isGroupOwner) {
             Log.i(TAG, "I am the Group Owner. IP: $groupOwnerAddress")
             MyceliumCore.sendLogToRust("WIFI", "P2P Соединение установлено! Статус: Group Owner (IP: $groupOwnerAddress, Скорость: ~58 МБ/с)")
-            MyceliumCore.onWifiDirectConnected(groupOwnerAddress ?: "", true)
+            MyceliumCore.onWifiDirectConnected(groupOwnerAddress, true)
         } else if (info.groupFormed) {
             Log.i(TAG, "I am a Client. Group Owner IP: $groupOwnerAddress")
             MyceliumCore.sendLogToRust("WIFI", "P2P Соединение установлено! Статус: Client (IP шлюза: $groupOwnerAddress, Скорость: ~58 МБ/с)")
-            MyceliumCore.onWifiDirectConnected(groupOwnerAddress ?: "", false)
+            MyceliumCore.onWifiDirectConnected(groupOwnerAddress, false)
         }
     }
 
@@ -98,6 +108,7 @@ class TaigaWifiManager(
             }
 
             override fun onFailure(reason: Int) {
+                isConnecting = false
                 Log.e(TAG, "Failed to connect to peer: $reason")
                 MyceliumCore.sendLogToRust("WIFI", "Не удалось подключиться к P2P устройству. Код: $reason")
             }

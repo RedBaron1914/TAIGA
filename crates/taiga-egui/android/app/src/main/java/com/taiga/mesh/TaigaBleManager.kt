@@ -88,6 +88,8 @@ class TaigaBleManager(private val context: Context, private var localNodeId: Byt
     }
 
     private fun startGattServer() {
+        val incomingChunkBuffers = java.util.concurrent.ConcurrentHashMap<String, java.util.concurrent.ConcurrentHashMap<Byte, Pair<Array<ByteArray?>, Long>>>()
+
         val serverCallback = object : BluetoothGattServerCallback() {
             override fun onConnectionStateChange(device: BluetoothDevice, status: Int, newState: Int) {
                 Log.i(TAG, "GATT Server Connection State Change: $newState from ${device.address}")
@@ -105,18 +107,62 @@ class TaigaBleManager(private val context: Context, private var localNodeId: Byt
                 super.onCharacteristicWriteRequest(device, requestId, characteristic, preparedWrite, responseNeeded, offset, value)
                 
                 if (characteristic.uuid == RX_CHAR_UUID) {
-                    Log.i(TAG, "Received ${value.size} bytes from ${device.address}")
-                    // Передаем полученные байты (Хвоинку) в Rust-ядро через JNI
-                    MyceliumCore.onBleMessageReceived(device.address, value)
-                    
                     if (responseNeeded) {
                         gattServer?.sendResponse(device, requestId, BluetoothGatt.GATT_SUCCESS, 0, null)
+                    }
+
+                    // Очистка старых буферов сборки (старше 10 секунд)
+                    val now = System.currentTimeMillis()
+                    val devMac = device.address
+                    val devBuffers = incomingChunkBuffers.getOrPut(devMac) { java.util.concurrent.ConcurrentHashMap() }
+                    devBuffers.entries.removeIf { now - it.value.second > 10000 }
+
+                    // Если данные пришли с 4-байтовым заголовком фрейма BLE [msgId, totalChunks, chunkIdx, 0]
+                    if (value.size >= 4) {
+                        val msgId = value[0]
+                        val totalChunks = value[1].toInt() and 0xFF
+                        val chunkIdx = value[2].toInt() and 0xFF
+
+                        if (totalChunks <= 1) {
+                            val payload = value.copyOfRange(4, value.size)
+                            Log.i(TAG, "Received single-chunk payload (${payload.size} bytes) from $devMac")
+                            MyceliumCore.onBleMessageReceived(devMac, payload)
+                        } else if (chunkIdx < totalChunks) {
+                            val chunkData = value.copyOfRange(4, value.size)
+                            val bufferPair = devBuffers.getOrPut(msgId) { Pair(arrayOfNulls<ByteArray>(totalChunks), now) }
+                            bufferPair.first[chunkIdx] = chunkData
+
+                            // Проверяем, собраны ли все чанки
+                            val allChunks = bufferPair.first
+                            if (allChunks.all { it != null }) {
+                                devBuffers.remove(msgId)
+                                var totalLen = 0
+                                for (c in allChunks) totalLen += c!!.size
+                                val fullPayload = ByteArray(totalLen)
+                                var pos = 0
+                                for (c in allChunks) {
+                                    System.arraycopy(c!!, 0, fullPayload, pos, c.size)
+                                    pos += c.size
+                                }
+                                Log.i(TAG, "Reassembled $totalChunks chunks into full payload (${fullPayload.size} bytes) from $devMac")
+                                MyceliumCore.onBleMessageReceived(devMac, fullPayload)
+                            }
+                        }
+                    } else {
+                        // Fallback для неотформатированных пакетов
+                        MyceliumCore.onBleMessageReceived(devMac, value)
                     }
                 }
             }
         }
 
-        gattServer = bluetoothManager.openGattServer(context, serverCallback)
+        try {
+            gattServer = bluetoothManager.openGattServer(context, serverCallback)
+        } catch (e: SecurityException) {
+            Log.e(TAG, "SecurityException opening GATT server: ${e.message}")
+            MyceliumCore.sendLogToRust("NETWORK", "Ошибка безопасности: нет прав на запуск GATT-сервера.")
+            return
+        }
         
         val service = BluetoothGattService(SERVICE_UUID, BluetoothGattService.SERVICE_TYPE_PRIMARY)
         val rxCharacteristic = BluetoothGattCharacteristic(
@@ -180,7 +226,12 @@ class TaigaBleManager(private val context: Context, private var localNodeId: Byt
             }
         }
 
-        bleAdvertiser?.startAdvertising(settings, data, scanResponse, advertiseCallback)
+        try {
+            bleAdvertiser?.startAdvertising(settings, data, scanResponse, advertiseCallback)
+        } catch (e: SecurityException) {
+            Log.e(TAG, "SecurityException starting BLE advertising: ${e.message}")
+            MyceliumCore.sendLogToRust("NETWORK", "Ошибка безопасности при запуске BLE рекламы (проверьте разрешения).")
+        }
     }
 
     private val scanHandler = android.os.Handler(android.os.Looper.getMainLooper())
@@ -189,6 +240,8 @@ class TaigaBleManager(private val context: Context, private var localNodeId: Byt
             try {
                 scanCallback?.let { bleScanner?.stopScan(it) }
                 scanCallback?.let { bleScanner?.startScan(listOf(ScanFilter.Builder().setServiceUuid(ParcelUuid(SERVICE_UUID)).build()), ScanSettings.Builder().setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY).build(), it) }
+            } catch (e: SecurityException) {
+                Log.e(TAG, "SecurityException during BLE scan recycling: ${e.message}")
             } catch (e: Exception) {
                 Log.e(TAG, "Error recycling BLE scanner: ${e.message}")
             }
@@ -229,7 +282,12 @@ class TaigaBleManager(private val context: Context, private var localNodeId: Byt
             }
         }
 
-        bleScanner?.startScan(listOf(filter), settings, scanCallback)
+        try {
+            bleScanner?.startScan(listOf(filter), settings, scanCallback)
+        } catch (e: SecurityException) {
+            Log.e(TAG, "SecurityException starting BLE scan: ${e.message}")
+            MyceliumCore.sendLogToRust("NETWORK", "Ошибка безопасности при запуске BLE сканера (проверьте разрешения).")
+        }
         scanHandler.removeCallbacks(scanRestartRunnable)
         scanHandler.postDelayed(scanRestartRunnable, 30000)
         
@@ -237,10 +295,37 @@ class TaigaBleManager(private val context: Context, private var localNodeId: Byt
         MyceliumCore.sendLogToRust("NETWORK", "BLE Сканер эфира запущен.")
     }
 
+    private val nextMsgId = java.util.concurrent.atomic.AtomicInteger(1)
+
     fun sendMessage(macAddress: String, payload: ByteArray) {
         val queue = outgoingQueues.getOrPut(macAddress) { java.util.ArrayDeque() }
         synchronized(queue) {
-            queue.add(payload)
+            val chunkSize = 16
+            val totalChunks = (payload.size + chunkSize - 1) / chunkSize
+
+            // Ограничение длины очереди для предотвращения OutOfMemoryError (OOM). 
+            // Отбрасываем сообщение целиком, если в очереди нет места для всех его чанков, во избежание повреждения данных.
+            if (queue.size + totalChunks > 200) {
+                Log.w(TAG, "BLE queue for $macAddress is full (${queue.size} chunks), discarding new message of size ${payload.size} ($totalChunks chunks)")
+                return
+            }
+
+            val msgId = (nextMsgId.getAndIncrement() % 250).toByte()
+
+            for (i in 0 until totalChunks) {
+                val start = i * chunkSize
+                val end = kotlin.math.min(start + chunkSize, payload.size)
+                val chunkData = payload.copyOfRange(start, end)
+
+                val framedChunk = ByteArray(4 + chunkData.size)
+                framedChunk[0] = msgId
+                framedChunk[1] = totalChunks.toByte()
+                framedChunk[2] = i.toByte()
+                framedChunk[3] = 0
+                System.arraycopy(chunkData, 0, framedChunk, 4, chunkData.size)
+
+                queue.add(framedChunk)
+            }
         }
 
         val existingGatt = activeGatts[macAddress]

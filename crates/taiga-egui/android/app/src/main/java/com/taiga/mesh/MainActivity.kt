@@ -22,28 +22,7 @@ class MainActivity : GameActivity() {
         }
     }
 
-    private var bleManager: TaigaBleManager? = null
-    private var wifiManager: TaigaWifiManager? = null
-
-    private val bluetoothStateReceiver = object : BroadcastReceiver() {
-        override fun onReceive(context: Context, intent: Intent) {
-            val action = intent.action
-            if (action == BluetoothAdapter.ACTION_STATE_CHANGED) {
-                val state = intent.getIntExtra(BluetoothAdapter.EXTRA_STATE, BluetoothAdapter.ERROR)
-                when (state) {
-                    BluetoothAdapter.STATE_OFF -> {
-                        Log.i("TAIGA", "Bluetooth выключен пользователем. Останавливаем BLE.")
-                        bleManager?.stop()
-                        bleManager = null
-                    }
-                    BluetoothAdapter.STATE_ON -> {
-                        Log.i("TAIGA", "Bluetooth включен. Запускаем BLE.")
-                        startBleTransport()
-                    }
-                }
-            }
-        }
-    }
+    // Вся логика BLE и Wi-Fi Direct перенесена в фоновую службу TaigaService
 
     private fun getOrCreateNodeId(): ByteArray {
         val prefs = getSharedPreferences("taiga_prefs", Context.MODE_PRIVATE)
@@ -74,9 +53,6 @@ class MainActivity : GameActivity() {
         
         Log.i("TAIGA", "Starting GameActivity for egui...")
 
-        // Регистрируем слушатель для отслеживания состояния Bluetooth
-        registerReceiver(bluetoothStateReceiver, IntentFilter(BluetoothAdapter.ACTION_STATE_CHANGED))
-
         // Начиная с Android 6+ (и особенно 12+) разрешения нужно запрашивать "вживую"
         requestTaigaPermissions()
     }
@@ -86,12 +62,6 @@ class MainActivity : GameActivity() {
         if (MyceliumCore.activity === this) {
             MyceliumCore.activity = null
         }
-        try {
-            unregisterReceiver(bluetoothStateReceiver)
-        } catch (e: Exception) {
-            Log.e("TAIGA", "Error unregistering receiver", e)
-        }
-        bleManager?.stop()
     }
 
     private fun requestTaigaPermissions() {
@@ -107,9 +77,10 @@ class MainActivity : GameActivity() {
             permissions.add(Manifest.permission.BLUETOOTH_ADVERTISE)
         }
         
-        // Android 13+ права для Wi-Fi Direct
+        // Android 13+ права для Wi-Fi Direct и уведомлений (для Foreground Service)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             permissions.add(Manifest.permission.NEARBY_WIFI_DEVICES)
+            permissions.add(Manifest.permission.POST_NOTIFICATIONS)
         }
 
         val missingPermissions = permissions.filter {
@@ -143,6 +114,16 @@ class MainActivity : GameActivity() {
         }
     }
 
+    private fun startTaigaService() {
+        Log.i("TAIGA", "Запускаем TaigaService...")
+        val intent = Intent(this, TaigaService::class.java)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            startForegroundService(intent)
+        } else {
+            startService(intent)
+        }
+    }
+
     private fun checkBluetoothAndStart() {
         val bluetoothManager = getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
         val bluetoothAdapter = bluetoothManager.adapter
@@ -150,17 +131,16 @@ class MainActivity : GameActivity() {
         if (bluetoothAdapter == null) {
             Log.e("TAIGA", "Bluetooth is not supported on this device.")
             MyceliumCore.sendLogToRust("NETWORK", "Bluetooth аппаратно не поддерживается на этом устройстве.")
-            startWifiTransport()
+            startTaigaService()
         } else if (!bluetoothAdapter.isEnabled) {
             Log.i("TAIGA", "Bluetooth выключен. Запрашиваем включение у пользователя...")
             MyceliumCore.sendLogToRust("NETWORK", "Bluetooth выключен. Ждем включения от пользователя...")
             val enableBtIntent = Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE)
             startActivityForResult(enableBtIntent, 1338)
-            // Wi-Fi можем запустить параллельно, не дожидаясь ответа по Bluetooth
-            startWifiTransport()
+            // Запускаем службу в любом случае, BLE поднимется после включения Bluetooth
+            startTaigaService()
         } else {
-            startBleTransport()
-            startWifiTransport()
+            startTaigaService()
         }
     }
 
@@ -170,69 +150,10 @@ class MainActivity : GameActivity() {
             if (resultCode == android.app.Activity.RESULT_OK) {
                 Log.i("TAIGA", "Пользователь включил Bluetooth.")
                 MyceliumCore.sendLogToRust("NETWORK", "Bluetooth успешно включен пользователем!")
-                startBleTransport()
+                // Сервис уже запущен, он автоматически подхватит BLE благодаря bluetoothStateReceiver
             } else {
                 Log.e("TAIGA", "Пользователь отказался включать Bluetooth.")
                 MyceliumCore.sendLogToRust("NETWORK", "Пользователь отклонил запрос на включение Bluetooth. Работаем только по Wi-Fi.")
-            }
-        }
-    }
-
-    private fun startBleTransport() {
-        if (bleManager == null) {
-            val nodeId = getOrCreateNodeId()
-            bleManager = TaigaBleManager(this, nodeId)
-            bleManager?.start()
-        }
-    }
-
-    fun updateLocalNodeId(uuidStr: String) {
-        val uuid = java.util.UUID.fromString(uuidStr)
-        val bb = java.nio.ByteBuffer.wrap(ByteArray(16))
-        bb.putLong(uuid.mostSignificantBits)
-        bb.putLong(uuid.leastSignificantBits)
-        
-        bleManager?.updateNodeId(bb.array())
-    }
-
-    fun restartBleAdvertising() {
-        bleManager?.restartAdvertising()
-    }
-
-    private fun startWifiTransport() {
-        if (wifiManager == null) {
-            val p2pManager = getSystemService(Context.WIFI_P2P_SERVICE) as WifiP2pManager?
-            if (p2pManager != null) {
-                val channel = p2pManager.initialize(this, mainLooper, null)
-                wifiManager = TaigaWifiManager(this, p2pManager, channel)
-                registerReceiver(wifiManager, wifiManager?.getIntentFilter())
-                
-                // Запускаем поиск пиров по Wi-Fi Direct
-                wifiManager?.discoverPeers()
-            } else {
-                Log.e("TAIGA", "Wi-Fi Direct is not supported on this device.")
-            }
-        }
-    }
-
-    fun sendBleMessage(macAddress: String, payload: ByteArray) {
-        bleManager?.sendMessage(macAddress, payload)
-    }
-
-    override fun onResume() {
-        super.onResume()
-        wifiManager?.let {
-            registerReceiver(it, it.getIntentFilter())
-        }
-    }
-
-    override fun onPause() {
-        super.onPause()
-        wifiManager?.let {
-            try {
-                unregisterReceiver(it)
-            } catch (e: IllegalArgumentException) {
-                // Игнорируем, если ресивер не был зарегистрирован
             }
         }
     }

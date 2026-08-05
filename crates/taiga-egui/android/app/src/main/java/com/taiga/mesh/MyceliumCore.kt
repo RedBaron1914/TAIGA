@@ -16,12 +16,20 @@ object MyceliumCore {
             activityRef = if (value != null) java.lang.ref.WeakReference(value) else null
         }
 
+    private var serviceRef: java.lang.ref.WeakReference<TaigaService>? = null
+
+    var service: TaigaService?
+        get() = serviceRef?.get()
+        set(value) {
+            serviceRef = if (value != null) java.lang.ref.WeakReference(value) else null
+        }
+
     private var lastBleRestartTime: Long = 0L
 
     @JvmStatic
     fun pingBypassingVpn(urlString: String): Boolean {
-        val act = activity ?: return false
-        val cm = act.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager ?: return false
+        val ctx = activity ?: service ?: return false
+        val cm = ctx.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager ?: return false
         val activeNetwork = cm.activeNetwork ?: return false
         val caps = cm.getNetworkCapabilities(activeNetwork) ?: return false
 
@@ -45,8 +53,8 @@ object MyceliumCore {
 
     @JvmStatic
     fun hasPhysicalInternet(): Boolean {
-        val act = activity ?: return false
-        val cm = act.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager ?: return false
+        val ctx = activity ?: service ?: return false
+        val cm = ctx.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager ?: return false
         val activeNetwork = cm.activeNetwork ?: return false
         val caps = cm.getNetworkCapabilities(activeNetwork) ?: return false
 
@@ -68,8 +76,8 @@ object MyceliumCore {
 
     @JvmStatic
     fun saveFreedomLevel(level: Int, isVirtual: Boolean) {
-        val act = activity ?: return
-        val prefs = act.getSharedPreferences("taiga_prefs", Context.MODE_PRIVATE)
+        val ctx = activity ?: service ?: return
+        val prefs = ctx.getSharedPreferences("taiga_prefs", Context.MODE_PRIVATE)
         val oldLevel = prefs.getInt("freedom_level", -1)
         val oldVirtual = prefs.getBoolean("is_virtual_uplink", false)
 
@@ -84,42 +92,42 @@ object MyceliumCore {
             val now = System.currentTimeMillis()
             if (now - lastBleRestartTime > 2000) {
                 lastBleRestartTime = now
-                act.restartBleAdvertising()
+                service?.restartBleAdvertising()
             }
         }
     }
 
     @JvmStatic
     fun getSavedFreedomLevel(): Int {
-        val act = activity ?: return 0
-        return act.getSharedPreferences("taiga_prefs", Context.MODE_PRIVATE)
+        val ctx = activity ?: service ?: return 0
+        return ctx.getSharedPreferences("taiga_prefs", Context.MODE_PRIVATE)
             .getInt("freedom_level", 0)
     }
 
     @JvmStatic
     fun getSavedVirtualUplink(): Boolean {
-        val act = activity ?: return false
-        return act.getSharedPreferences("taiga_prefs", Context.MODE_PRIVATE)
+        val ctx = activity ?: service ?: return false
+        return ctx.getSharedPreferences("taiga_prefs", Context.MODE_PRIVATE)
             .getBoolean("is_virtual_uplink", false)
     }
 
     @JvmStatic
     fun saveNodeId(uuidStr: String) {
-        val act = activity ?: return
-        val prefs = act.getSharedPreferences("taiga_prefs", Context.MODE_PRIVATE)
+        val ctx = activity ?: service ?: return
+        val prefs = ctx.getSharedPreferences("taiga_prefs", Context.MODE_PRIVATE)
         prefs.edit()
             .putString("node_id", uuidStr)
             .apply()
         
         Log.i(TAG, "Node ID updated to: $uuidStr")
-        act.updateLocalNodeId(uuidStr)
+        service?.updateLocalNodeId(uuidStr)
     }
 
     // Нативные функции, реализованные в Rust (jni_bridge.rs)
     
     @JvmStatic
     fun sendBleMessage(macAddress: String, payload: ByteArray) {
-        activity?.sendBleMessage(macAddress, payload)
+        service?.sendBleMessage(macAddress, payload)
     }
 
     @JvmStatic

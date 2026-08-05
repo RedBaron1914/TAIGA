@@ -72,6 +72,13 @@ impl WifiRoot {
             let needle_tx_clone = needle_tx.clone();
             tokio::spawn(async move {
                 while let Ok((stream, addr)) = listener.accept().await {
+                    let current_peers_count = peers_clone.lock().await.len();
+                    if current_peers_count >= 50 {
+                        log::warn!("[WifiRoot] Превышен лимит параллельных TCP-подключений (50). Отклонено новое подключение от {}", addr);
+                        drop(stream);
+                        continue;
+                    }
+
                     log::info!("[WifiRoot] Новое входящее TCP-подключение от {}", addr);
                     #[cfg(target_os = "android")]
                     crate::jni_bridge::send_ui_log("WIFI", &format!("Новое входящее P2P-подключение от {}", addr));

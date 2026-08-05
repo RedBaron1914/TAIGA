@@ -324,7 +324,7 @@ impl Mycelium {
                 };
                 // Обновляем кэш в статике для быстрого доступа при следующем старте
                 {
-                    let mut lock = crate::jni_bridge::ANDROID_FREEDOM_LEVEL.lock().unwrap();
+                    let mut lock = crate::jni_bridge::ANDROID_FREEDOM_LEVEL.lock().unwrap_or_else(|e| e.into_inner());
                     *lock = Some((level_int, is_virtual_uplink));
                 }
                 crate::jni_bridge::save_freedom_level(level_int, is_virtual_uplink);
